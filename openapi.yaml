@@ -3,15 +3,13 @@
 
 openapi: 3.0.3
 info:
-    title: Greeter API
-    description: The greeting service definition.
+    title: ""
     version: 0.0.1
 paths:
     /helloworld/{name}:
         get:
             tags:
                 - Greeter
-                - subgroup
             description: Sends a greeting
             operationId: Greeter_SayHello
             parameters:
@@ -27,6 +25,19 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/helloworld.v1.HelloReply'
+    /v1/resources:
+        get:
+            tags:
+                - ResourceService
+            description: 1. 列出全部资源
+            operationId: ResourceService_ListResources
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resource.v1.ListResourcesReply'
 components:
     schemas:
         helloworld.v1.HelloReply:
@@ -35,5 +46,18 @@ components:
                 message:
                     type: string
             description: The response message containing the greetings
+        resource.v1.ListResourcesReply:
+            type: object
+            properties:
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/resource.v1.Resource'
+        resource.v1.Resource:
+            type: object
+            properties: {}
+            description: =====================实体/值对象=======================
 tags:
     - name: Greeter
+      description: The greeting service definition.
+    - name: ResourceService

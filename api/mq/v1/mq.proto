@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package mq;
+option go_package = "resource/api/mq/v1;v1";
+import "google/protobuf/timestamp.proto";
+
+message Event {
+  string event_type = 1;
+  int64 instance_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  optional InstanceSpec spec  = 4;
+}
+
+message InstanceSpec{
+  uint32 cpus = 1;
+  uint32 gpu = 3;
+  uint32 memory_mb = 2;
+  string image = 4;
+}
+
+enum EventType {
+  INSTANCE_EVENT_UNSPECIFIED = 0;
+  INSTANCE_CREATED = 1;
+  INSTANCE_DELETED = 2;
+  INSTANCE_SPEC_CHANGED = 3;
+  INSTANCE_IMAGE_REMOVED = 4;
+  INSTANCE_IMAGE_UPDATED = 5;
+  INSTANCE_STARTED = 6;
+  INSTANCE_STOPPED = 7;
+  INSTANCE_STATUS_CHANGED = 8;
+  INSTANCE_K8S_SYNC = 9;
+  INSTANCE_NETWORK_UPDATED = 10;
+}

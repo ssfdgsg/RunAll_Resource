@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package resource.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "resource/api/resource/v1;v1";
+option java_multiple_files = true;
+option java_package = "dev.kratos.api.resource.v1";
+option java_outer_classname = "resourceProtoV1";
+
+service resourceService {
+  //1. 列出全部资源
+  rpc ListResources (ListResourcesReq) returns (ListResourcesReply) {
+    option (google.api.http) = {
+      get: "/v1/resources"
+    };
+  }
+}
+
+//=====================实体/值对象=======================
+message Resource {
+}
+
+//1. 列出全部资源
+message ListResourcesReq {
+
+}
+message ListResourcesReply {
+  repeated Resource resources = 1;
+}
+

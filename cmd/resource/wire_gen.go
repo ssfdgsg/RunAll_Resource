@@ -7,13 +7,13 @@
 package main
 
 import (
+	"github.com/go-kratos/kratos/v2"
+	"github.com/go-kratos/kratos/v2/log"
 	"resource/internal/biz"
 	"resource/internal/conf"
 	"resource/internal/data"
 	"resource/internal/server"
 	"resource/internal/service"
-	"github.com/go-kratos/kratos/v2"
-	"github.com/go-kratos/kratos/v2/log"
 )
 
 import (
@@ -28,13 +28,20 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	if err != nil {
 		return nil, nil, err
 	}
+	rabbitMQConnection, cleanup2, err := data.NewRabbitMQ(confData, logger)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	greeterRepo := data.NewGreeterRepo(dataData, logger)
 	greeterUsecase := biz.NewGreeterUsecase(greeterRepo, logger)
 	greeterService := service.NewGreeterService(greeterUsecase)
 	grpcServer := server.NewGRPCServer(confServer, greeterService, logger)
 	httpServer := server.NewHTTPServer(confServer, greeterService, logger)
-	app := newApp(logger, grpcServer, httpServer)
+	mqServer := server.NewMQServer(confData, rabbitMQConnection, greeterService, logger)
+	app := newApp(logger, grpcServer, httpServer, mqServer)
 	return app, func() {
+		cleanup2()
 		cleanup()
 	}, nil
 }

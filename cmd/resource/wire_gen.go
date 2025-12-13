@@ -28,18 +28,28 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	if err != nil {
 		return nil, nil, err
 	}
-	rabbitMQConnection, cleanup2, err := data.NewRabbitMQ(confData, logger)
+	greeterRepo := data.NewGreeterRepo(dataData, logger)
+	greeterUsecase := biz.NewGreeterUsecase(greeterRepo, logger)
+	greeterService := service.NewGreeterService(greeterUsecase)
+	httpServer := server.NewHTTPServer(confServer, greeterService, logger)
+	grpcServer := server.NewGRPCServer(confServer, greeterService, logger)
+	connection, cleanup2, err := data.NewRabbitMQ(confData, logger)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	greeterRepo := data.NewGreeterRepo(dataData, logger)
-	greeterUsecase := biz.NewGreeterUsecase(greeterRepo, logger)
-	greeterService := service.NewGreeterService(greeterUsecase)
-	grpcServer := server.NewGRPCServer(confServer, greeterService, logger)
-	httpServer := server.NewHTTPServer(confServer, greeterService, logger)
-	mqServer := server.NewMQServer(confData, rabbitMQConnection, greeterService, logger)
-	app := newApp(logger, grpcServer, httpServer, mqServer)
+	instanceRepo := data.NewResourceRepo(dataData, logger)
+	auditRepo := data.NewAuditRepo(dataData, logger)
+	k8sRepo, err := data.NewK8sRepo(confData, logger)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	resourceUsecase := biz.NewResourceUsecase(instanceRepo, auditRepo, k8sRepo, logger)
+	resourceService := service.NewResourceService(resourceUsecase)
+	mqServer := server.NewMQServer(confData, connection, resourceService, logger)
+	app := newApp(logger, httpServer, grpcServer, mqServer)
 	return app, func() {
 		cleanup2()
 		cleanup()

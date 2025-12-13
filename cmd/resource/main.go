@@ -5,13 +5,15 @@ import (
 	"os"
 
 	"resource/internal/conf"
+	"resource/internal/server"
 
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"
 	"github.com/go-kratos/kratos/v2/config/file"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
-	"github.com/go-kratos/kratos/v2/transport"
+	"github.com/go-kratos/kratos/v2/transport/grpc"
+	"github.com/go-kratos/kratos/v2/transport/http"
 	_ "go.uber.org/automaxprocs"
 )
 
@@ -28,10 +30,25 @@ var (
 )
 
 func init() {
-	flag.StringVar(&flagconf, "conf", "../../configs", "config path, eg: -conf config.yaml")
+	flag.StringVar(&flagconf, "conf", detectConfigPath(), "config path, eg: -conf config.yaml")
 }
 
-func newApp(logger log.Logger, servers ...transport.Server) *kratos.App {
+func detectConfigPath() string {
+	candidates := []string{
+		"configs",
+		"./configs",
+		"../configs",
+		"../../configs",
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			return c
+		}
+	}
+	return "configs"
+}
+
+func newApp(logger log.Logger, httpServer *http.Server, grpcServer *grpc.Server, mqServer *server.MQServer) *kratos.App {
 	return kratos.New(
 		kratos.ID(id),
 		kratos.Name(Name),
@@ -39,7 +56,9 @@ func newApp(logger log.Logger, servers ...transport.Server) *kratos.App {
 		kratos.Metadata(map[string]string{}),
 		kratos.Logger(logger),
 		kratos.Server(
-			servers...,
+			httpServer,
+			grpcServer,
+			mqServer,
 		),
 	)
 }

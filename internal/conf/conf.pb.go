@@ -131,6 +131,7 @@ type Data struct {
 	Database      *Data_Database         `protobuf:"bytes,1,opt,name=database,proto3" json:"database,omitempty"`
 	Redis         *Data_Redis            `protobuf:"bytes,2,opt,name=redis,proto3" json:"redis,omitempty"`
 	Rabbitmq      *Data_RabbitMQ         `protobuf:"bytes,3,opt,name=rabbitmq,proto3" json:"rabbitmq,omitempty"`
+	Kubernetes    *Data_Kubernetes       `protobuf:"bytes,4,opt,name=kubernetes,proto3" json:"kubernetes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -182,6 +183,13 @@ func (x *Data) GetRedis() *Data_Redis {
 func (x *Data) GetRabbitmq() *Data_RabbitMQ {
 	if x != nil {
 		return x.Rabbitmq
+	}
+	return nil
+}
+
+func (x *Data) GetKubernetes() *Data_Kubernetes {
+	if x != nil {
+		return x.Kubernetes
 	}
 	return nil
 }
@@ -494,6 +502,50 @@ func (x *Data_RabbitMQ) GetRoutingKey() string {
 	return ""
 }
 
+type Data_Kubernetes struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kubeconfig    string                 `protobuf:"bytes,1,opt,name=kubeconfig,proto3" json:"kubeconfig,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Data_Kubernetes) Reset() {
+	*x = Data_Kubernetes{}
+	mi := &file_conf_conf_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Data_Kubernetes) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Data_Kubernetes) ProtoMessage() {}
+
+func (x *Data_Kubernetes) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Data_Kubernetes.ProtoReflect.Descriptor instead.
+func (*Data_Kubernetes) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{2, 3}
+}
+
+func (x *Data_Kubernetes) GetKubeconfig() string {
+	if x != nil {
+		return x.Kubeconfig
+	}
+	return ""
+}
+
 var File_conf_conf_proto protoreflect.FileDescriptor
 
 const file_conf_conf_proto_rawDesc = "" +
@@ -513,11 +565,14 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x04GRPC\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\x85\x04\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xf0\x04\n" +
 	"\x04Data\x125\n" +
 	"\bdatabase\x18\x01 \x01(\v2\x19.kratos.api.Data.DatabaseR\bdatabase\x12,\n" +
 	"\x05redis\x18\x02 \x01(\v2\x16.kratos.api.Data.RedisR\x05redis\x125\n" +
-	"\brabbitmq\x18\x03 \x01(\v2\x19.kratos.api.Data.RabbitMQR\brabbitmq\x1a:\n" +
+	"\brabbitmq\x18\x03 \x01(\v2\x19.kratos.api.Data.RabbitMQR\brabbitmq\x12;\n" +
+	"\n" +
+	"kubernetes\x18\x04 \x01(\v2\x1b.kratos.api.Data.KubernetesR\n" +
+	"kubernetes\x1a:\n" +
 	"\bDatabase\x12\x16\n" +
 	"\x06driver\x18\x01 \x01(\tR\x06driver\x12\x16\n" +
 	"\x06source\x18\x02 \x01(\tR\x06source\x1a\xb3\x01\n" +
@@ -531,7 +586,12 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x05queue\x18\x02 \x01(\tR\x05queue\x12\x1a\n" +
 	"\bexchange\x18\x03 \x01(\tR\bexchange\x12\x1f\n" +
 	"\vrouting_key\x18\x04 \x01(\tR\n" +
-	"routingKeyB\x1dZ\x1bresource/internal/conf;confb\x06proto3"
+	"routingKey\x1a,\n" +
+	"\n" +
+	"Kubernetes\x12\x1e\n" +
+	"\n" +
+	"kubeconfig\x18\x01 \x01(\tR\n" +
+	"kubeconfigB\x1dZ\x1bresource/internal/conf;confb\x06proto3"
 
 var (
 	file_conf_conf_proto_rawDescOnce sync.Once
@@ -545,7 +605,7 @@ func file_conf_conf_proto_rawDescGZIP() []byte {
 	return file_conf_conf_proto_rawDescData
 }
 
-var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil),           // 0: kratos.api.Bootstrap
 	(*Server)(nil),              // 1: kratos.api.Server
@@ -555,7 +615,8 @@ var file_conf_conf_proto_goTypes = []any{
 	(*Data_Database)(nil),       // 5: kratos.api.Data.Database
 	(*Data_Redis)(nil),          // 6: kratos.api.Data.Redis
 	(*Data_RabbitMQ)(nil),       // 7: kratos.api.Data.RabbitMQ
-	(*durationpb.Duration)(nil), // 8: google.protobuf.Duration
+	(*Data_Kubernetes)(nil),     // 8: kratos.api.Data.Kubernetes
+	(*durationpb.Duration)(nil), // 9: google.protobuf.Duration
 }
 var file_conf_conf_proto_depIdxs = []int32{
 	1,  // 0: kratos.api.Bootstrap.server:type_name -> kratos.api.Server
@@ -565,15 +626,16 @@ var file_conf_conf_proto_depIdxs = []int32{
 	5,  // 4: kratos.api.Data.database:type_name -> kratos.api.Data.Database
 	6,  // 5: kratos.api.Data.redis:type_name -> kratos.api.Data.Redis
 	7,  // 6: kratos.api.Data.rabbitmq:type_name -> kratos.api.Data.RabbitMQ
-	8,  // 7: kratos.api.Server.HTTP.timeout:type_name -> google.protobuf.Duration
-	8,  // 8: kratos.api.Server.GRPC.timeout:type_name -> google.protobuf.Duration
-	8,  // 9: kratos.api.Data.Redis.read_timeout:type_name -> google.protobuf.Duration
-	8,  // 10: kratos.api.Data.Redis.write_timeout:type_name -> google.protobuf.Duration
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	8,  // 7: kratos.api.Data.kubernetes:type_name -> kratos.api.Data.Kubernetes
+	9,  // 8: kratos.api.Server.HTTP.timeout:type_name -> google.protobuf.Duration
+	9,  // 9: kratos.api.Server.GRPC.timeout:type_name -> google.protobuf.Duration
+	9,  // 10: kratos.api.Data.Redis.read_timeout:type_name -> google.protobuf.Duration
+	9,  // 11: kratos.api.Data.Redis.write_timeout:type_name -> google.protobuf.Duration
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_conf_conf_proto_init() }
@@ -587,7 +649,7 @@ func file_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conf_conf_proto_rawDesc), len(file_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

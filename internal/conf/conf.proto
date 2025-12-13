@@ -42,7 +42,11 @@ message Data {
     string exchange = 3;
     string routing_key = 4;
   }
+  message Kubernetes {
+    string kubeconfig = 1;
+  }
   Database database = 1;
   Redis redis = 2;
   RabbitMQ rabbitmq = 3;
+  Kubernetes kubernetes = 4;
 }

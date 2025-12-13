@@ -8,7 +8,9 @@ message Event {
   string event_type = 1;
   int64 instance_id = 2;
   google.protobuf.Timestamp timestamp = 3;
-  optional InstanceSpec spec  = 4;
+  int64 user_id= 4;
+  string name = 5;
+  optional InstanceSpec spec  = 6;
 }
 
 message InstanceSpec{

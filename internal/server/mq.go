@@ -13,8 +13,6 @@ import (
 
 var _ transport.Server = (*MQServer)(nil)
 
-const defaultQueueName = "greeter.hello"
-
 // MQServer consumes RabbitMQ messages and routes them to the greeter service.
 type MQServer struct {
 	conn *amqp.Connection
@@ -25,6 +23,9 @@ type MQServer struct {
 	queue      string
 	exchange   string
 	routingKey string
+
+	consumerTag string
+	consumeFunc func(context.Context, []byte) error
 }
 
 // NewMQServer new a MQ server.
@@ -42,14 +43,15 @@ func NewMQServer(c *conf.Data, conn *amqp.Connection, resource *service.Resource
 	}
 }
 
-// Stop 断开channel 和 connection
+// Stop 停止 MQ 消费；连接由 data.NewRabbitMQ 的 cleanup 负责关闭。
 func (s *MQServer) Stop(ctx context.Context) error {
-	err := s.ch.Close()
-	if err != nil {
-		return err
+	if s.ch == nil {
+		return nil
 	}
-	err = s.conn.Close()
-	if err != nil {
+	if s.consumerTag != "" {
+		_ = s.ch.Cancel(s.consumerTag, false)
+	}
+	if err := s.ch.Close(); err != nil && err != amqp.ErrClosed {
 		return err
 	}
 	return nil
@@ -116,46 +118,94 @@ func (s *MQServer) Start(ctx context.Context) error {
 		}
 	}
 
-	// 5. 消费消息
+	// 5. QoS：单条串行处理，避免一次拉取过多消息
+	if err := s.ch.Qos(1, 0, false); err != nil {
+		return fmt.Errorf("qos set failed: %v", err)
+	}
+
+	// 6. 消费消息（autoAck 必须为 false，否则手动 Ack/Reject 会触发 channel exception）
+	s.consumerTag = "resource-consumer"
 	msgs, err := s.ch.Consume(
-		q.Name, // queue
-		"",     // consumer tag
-		true,   // auto-ack: 关闭自动确认
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
+		q.Name,        // queue
+		s.consumerTag, // consumer tag
+		false,         // auto-ack: 关闭自动确认
+		false,         // exclusive
+		false,         // no-local
+		false,         // no-wait
+		nil,           // args
 	)
 	if err != nil {
 		return err
 	}
 	s.log.Infof("MQ Consumer started on Queue [%s]. Mode: Serial/Blocking", s.queue)
 
-	// 6. 启动消费信息
-	for d := range msgs {
-		s.processMessage(ctx, d)
-	}
+	notifyClose := s.ch.NotifyClose(make(chan *amqp.Error, 1))
 
-	// 循环退出说明 Channel 被关闭了（通常是 Stop 方法触发的）
-	s.log.Info("MQ Consumer stopped")
-	return nil
+	// 7. 启动消费循环
+	for {
+		select {
+		case <-ctx.Done():
+			s.log.Info("MQ Consumer stopping (context canceled)")
+			_ = s.ch.Cancel(s.consumerTag, false)
+			return nil
+		case amqpErr := <-notifyClose:
+			if amqpErr != nil {
+				return fmt.Errorf("mq channel closed: %v", amqpErr)
+			}
+			s.log.Info("MQ channel closed")
+			return nil
+		case d, ok := <-msgs:
+			if !ok {
+				s.log.Info("MQ delivery channel closed")
+				return nil
+			}
+			s.processMessage(ctx, d)
+		}
+	}
 }
 
 // processMessage 处理单条消息
 func (s *MQServer) processMessage(ctx context.Context, d amqp.Delivery) {
+	fmt.Printf("the output is %d,%t,%d ", d.DeliveryTag, d.Redelivered, len(d.Body))
+	s.processMessageBody(
+		ctx,
+		d.Body,
+		func() error { return d.Ack(false) },
+		func() error { return d.Reject(true) },
+		func() error { return d.Reject(false) },
+	)
+}
+
+func (s *MQServer) processMessageBody(
+	ctx context.Context,
+	body []byte,
+	ack func() error,
+	rejectRequeue func() error,
+	rejectDrop func() error,
+) {
 	defer func() {
 		if r := recover(); r != nil {
 			s.log.Errorf("PANIC in MQ handler: %v", r)
-			// 发生 Panic 时，可以选择 Reject(false) 丢弃消息，避免死循环
-			_ = d.Reject(false)
+			if err := rejectDrop(); err != nil {
+				s.log.Errorf("Failed to drop message after panic: %v", err)
+			}
 		}
 	}()
 
-	if err := s.resource.ConsumeMqMessage(ctx, d.Body); err != nil {
+	consume := s.consumeFunc
+	if consume == nil {
+		consume = s.resource.ConsumeMqMessage
+	}
+	if err := consume(ctx, body); err != nil {
 		s.log.Errorf("Failed to process message: %v", err)
-		_ = d.Reject(true)
+		if err := rejectRequeue(); err != nil {
+			s.log.Errorf("Failed to reject message (requeue): %v", err)
+		}
 		return
 	}
-	_ = d.Ack(false)
+	if err := ack(); err != nil {
+		s.log.Errorf("Failed to ACK message: %v", err)
+		return
+	}
 	s.log.Info("Message handled and ACKed")
 }

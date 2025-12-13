@@ -47,6 +47,21 @@ func (s *ResourceService) ConsumeMqMessage(ctx context.Context, in []byte) error
 	switch event.EventType {
 	case mq.EventType_INSTANCE_CREATED.String():
 		// 处理实例创建事件
+		if event.Spec == nil {
+			return errors.New(400, "INVALID_ARGUMENT", "spec is required for INSTANCE_CREATED event")
+		}
+		spec := biz.InstanceSpec{
+			InstanceID: event.InstanceId,
+			UserID:     event.UserId,
+			Name:       event.Name,
+			CPU:        event.Spec.Cpus,
+			Memory:     event.Spec.MemoryMb,
+			GPU:        event.Spec.Gpu,
+			Image:      event.Spec.Image,
+			ConfigJSON: nil,
+		}
+		return s.uc.CreateInstance(ctx, spec)
+
 	case mq.EventType_INSTANCE_DELETED.String():
 		// 处理实例删除事件
 	case mq.EventType_INSTANCE_SPEC_CHANGED.String():

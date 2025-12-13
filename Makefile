@@ -2,13 +2,17 @@ GOHOSTOS:=$(shell go env GOHOSTOS)
 GOPATH:=$(shell go env GOPATH)
 VERSION=$(shell git describe --tags --always)
 
-# 通用的proto文件查找方案，支持Windows和Unix
 ifeq ($(GOHOSTOS), windows)
-	INTERNAL_PROTO_FILES=$(shell powershell -NoProfile -Command "Get-ChildItem -Path internal -Filter '*.proto' -Recurse | ForEach-Object {$$_.FullName.Substring([System.IO.Path]::GetFullPath('.').Length + 1).Replace([char]92, '/')}")
-	API_PROTO_FILES=$(shell powershell -NoProfile -Command "Get-ChildItem -Path api -Filter '*.proto' -Recurse | ForEach-Object {$$_.FullName.Substring([System.IO.Path]::GetFullPath('.').Length + 1).Replace([char]92, '/')}")
+	#the `find.exe` is different from `find` in bash/shell.
+	#the `find.exe` is different from `find` in bash/shell.
+	#to see https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/find.
+	#changed to use git-bash.exe to run find cli or other cli friendly, caused of every developer has a Git.
+	Git_Bash:=bash
+	INTERNAL_PROTO_FILES=$(shell $(Git_Bash) -lc "find internal -name '*.proto'")
+	API_PROTO_FILES=$(shell $(Git_Bash) -lc "find api -name '*.proto'")
 else
-	INTERNAL_PROTO_FILES=$(shell find internal -name '*.proto')
-	API_PROTO_FILES=$(shell find api -name '*.proto')
+	INTERNAL_PROTO_FILES=$(shell find internal -name *.proto)
+	API_PROTO_FILES=$(shell find api -name *.proto)
 endif
 
 .PHONY: init

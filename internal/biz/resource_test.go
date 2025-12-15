@@ -11,10 +11,19 @@ import (
 
 type instanceRepoStub struct {
 	err error
+
+	listResourcesFn func(ctx context.Context, filter ListResourcesFilter) ([]Resource, error)
 }
 
 func (s *instanceRepoStub) CreateInstance(ctx context.Context, spec InstanceSpec) error {
 	return s.err
+}
+
+func (s *instanceRepoStub) ListResources(ctx context.Context, filter ListResourcesFilter) ([]Resource, error) {
+	if s.listResourcesFn == nil {
+		return nil, s.err
+	}
+	return s.listResourcesFn(ctx, filter)
 }
 
 type k8sRepoStub struct {
@@ -70,5 +79,35 @@ func TestResourceUsecase_CreateInstance_PassesThroughOtherErrors(t *testing.T) {
 	err := uc.CreateInstance(context.Background(), InstanceSpec{InstanceID: 1})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err=%v want=%v", err, wantErr)
+	}
+}
+
+func TestResourceUsecase_ListResources_PassesThroughRepo(t *testing.T) {
+	logger := log.NewHelper(log.NewStdLogger(io.Discard))
+	uc := &ResourceUsecase{
+		InstanceSpec: &instanceRepoStub{
+			listResourcesFn: func(ctx context.Context, filter ListResourcesFilter) ([]Resource, error) {
+				if filter.UserID == nil || *filter.UserID != 7 {
+					t.Fatalf("filter.UserID=%v want=7", filter.UserID)
+				}
+				if filter.Type == nil || *filter.Type != "CREATING" {
+					t.Fatalf("filter.Type=%v want=CREATING", filter.Type)
+				}
+				return []Resource{{InstanceID: 1}}, nil
+			},
+		},
+		AuditRepo: &auditRepoStub{},
+		K8sRepo:   &k8sRepoStub{},
+		log:       logger,
+	}
+
+	userID := int64(7)
+	typ := "CREATING"
+	got, err := uc.ListResources(context.Background(), ListResourcesFilter{UserID: &userID, Type: &typ})
+	if err != nil {
+		t.Fatalf("err=%v want=nil", err)
+	}
+	if len(got) != 1 || got[0].InstanceID != 1 {
+		t.Fatalf("got=%v want=[{InstanceID:1}]", got)
 	}
 }

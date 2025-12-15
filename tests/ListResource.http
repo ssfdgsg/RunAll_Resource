@@ -1,0 +1,7 @@
+### ListResources (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/ListResources
+
+{
+  "user_id": "4222",
+  "type": "CREATING"
+}

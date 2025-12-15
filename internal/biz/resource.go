@@ -44,6 +44,7 @@ type InstanceSpec struct {
 
 type InstanceRepo interface {
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
+	ListResources(ctx context.Context, filter ListResourcesFilter) ([]Resource, error)
 }
 
 type K8sRepo interface {
@@ -79,4 +80,28 @@ func (uc *ResourceUsecase) CreateInstance(ctx context.Context, spec InstanceSpec
 		return err
 	}
 	return nil
+}
+
+// Resource is a read model for listing resources.
+type Resource struct {
+	InstanceID int64
+	Name       string
+	UserID     int64
+	Type       string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// ListResourcesFilter defines optional filters for listing resources.
+type ListResourcesFilter struct {
+	UserID *int64
+	Start  *time.Time
+	End    *time.Time
+	Type   *string
+}
+
+// ListResources returns resources filtered by ListResourcesFilter.
+func (uc *ResourceUsecase) ListResources(ctx context.Context, filter ListResourcesFilter) ([]Resource, error) {
+	uc.log.WithContext(ctx).Infof("ListResources: userID=%v type=%v start=%v end=%v", filter.UserID, filter.Type, filter.Start, filter.End)
+	return uc.InstanceSpec.ListResources(ctx, filter)
 }

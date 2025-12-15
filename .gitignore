@@ -37,3 +37,4 @@ bin/
 .vscode/
 .idea/
 *.swp
+/AGENTS.md

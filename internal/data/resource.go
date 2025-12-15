@@ -53,6 +53,43 @@ type instanceSpec struct {
 
 func (instanceSpec) TableName() string { return "instance_spec" }
 
+func (r *resourceRepo) ListResources(ctx context.Context, filter biz.ListResourcesFilter) ([]biz.Resource, error) {
+	var rows []instance
+	db := r.data.db.WithContext(ctx).
+		Model(&instance{}).
+		Where("deleted_at IS NULL")
+
+	if filter.UserID != nil {
+		db = db.Where("user_id = ?", *filter.UserID)
+	}
+	if filter.Type != nil && *filter.Type != "" {
+		db = db.Where("status = ?", *filter.Type)
+	}
+	if filter.Start != nil {
+		db = db.Where("created_at >= ?", *filter.Start)
+	}
+	if filter.End != nil {
+		db = db.Where("created_at <= ?", *filter.End)
+	}
+
+	if err := db.Order("created_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	out := make([]biz.Resource, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, biz.Resource{
+			InstanceID: row.InstanceID,
+			Name:       row.Name,
+			UserID:     row.UserID,
+			Type:       row.Status,
+			CreatedAt:  row.CreatedAt,
+			UpdatedAt:  row.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 // CreateInstance 负责落库 Instance 及其规格
 func (r *resourceRepo) CreateInstance(ctx context.Context, spec biz.InstanceSpec) error {
 	instanceSpecDetail := &instanceSpec{

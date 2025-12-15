@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-kratos/kratos/v2/errors"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type ResourceService struct {
@@ -84,4 +86,86 @@ func (s *ResourceService) ConsumeMqMessage(ctx context.Context, in []byte) error
 		return errors.New(400, "UNKNOWN_EVENT_TYPE", "unknown event type")
 	}
 	return nil
+}
+
+func (s *ResourceService) ListResources(ctx context.Context, in *v1.ListResourcesReq) (*v1.ListResourcesReply, error) {
+	if in == nil {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "request is required")
+	}
+
+	var filter biz.ListResourcesFilter
+	if in.UserId != nil {
+		filter.UserID = in.UserId
+	}
+	if in.Type != nil {
+		filter.Type = in.Type
+	}
+	if in.Start != nil {
+		start := in.Start.AsTime()
+		filter.Start = &start
+	}
+	if in.End != nil {
+		end := in.End.AsTime()
+		filter.End = &end
+	}
+
+	resources, err := s.uc.ListResources(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	reply := &v1.ListResourcesReply{
+		Resources: make([]*v1.Resource, 0, len(resources)),
+	}
+
+	mask := in.GetFieldMask()
+	for _, resource := range resources {
+		item := &v1.Resource{
+			InstanceId: resource.InstanceID,
+			Name:       resource.Name,
+			UserId:     resource.UserID,
+			Type:       resource.Type,
+			CreatedAt:  timestamppb.New(resource.CreatedAt),
+			UpdatedAt:  timestamppb.New(resource.UpdatedAt),
+		}
+		if mask != nil && len(mask.GetPaths()) > 0 {
+			item, err = applyResourceFieldMask(item, mask)
+			if err != nil {
+				return nil, err
+			}
+		}
+		reply.Resources = append(reply.Resources, item)
+	}
+
+	return reply, nil
+}
+
+func applyResourceFieldMask(in *v1.Resource, mask *fieldmaskpb.FieldMask) (*v1.Resource, error) {
+	if in == nil {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "resource is required")
+	}
+	if mask == nil || len(mask.GetPaths()) == 0 {
+		return in, nil
+	}
+
+	out := &v1.Resource{}
+	for _, path := range mask.GetPaths() {
+		switch path {
+		case "instance_id", "instanceId":
+			out.InstanceId = in.InstanceId
+		case "name":
+			out.Name = in.Name
+		case "user_id", "userId":
+			out.UserId = in.UserId
+		case "type":
+			out.Type = in.Type
+		case "created_at", "createdAt":
+			out.CreatedAt = in.CreatedAt
+		case "updated_at", "updatedAt":
+			out.UpdatedAt = in.UpdatedAt
+		default:
+			return nil, errors.New(400, "INVALID_FIELD_MASK", "unknown field mask path: "+path)
+		}
+	}
+	return out, nil
 }

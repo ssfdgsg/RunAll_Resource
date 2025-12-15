@@ -90,6 +90,38 @@ func (r *resourceRepo) ListResources(ctx context.Context, filter biz.ListResourc
 	return out, nil
 }
 
+// ListResourceSpecs 列出实例规格
+func (r *resourceRepo) ListResourceSpecs(ctx context.Context, instanceIDs []int64) (map[int64]biz.InstanceSpec, error) {
+	if len(instanceIDs) == 0 {
+		return map[int64]biz.InstanceSpec{}, nil
+	}
+
+	var rows []instanceSpec
+	if err := r.data.db.WithContext(ctx).
+		Model(&instanceSpec{}).
+		Where("instance_id IN ?", instanceIDs).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	out := make(map[int64]biz.InstanceSpec, len(rows))
+	for _, row := range rows {
+		var gpu uint32
+		if row.GPU != nil {
+			gpu = *row.GPU
+		}
+		out[row.InstanceID] = biz.InstanceSpec{
+			InstanceID: row.InstanceID,
+			CPU:        row.CPU,
+			Memory:     row.Memory,
+			GPU:        gpu,
+			Image:      row.Image,
+			ConfigJSON: append([]byte(nil), row.ConfigJSON...),
+		}
+	}
+	return out, nil
+}
+
 // CreateInstance 负责落库 Instance 及其规格
 func (r *resourceRepo) CreateInstance(ctx context.Context, spec biz.InstanceSpec) error {
 	instanceSpecDetail := &instanceSpec{

@@ -13,6 +13,7 @@ type instanceRepoStub struct {
 	err error
 
 	listResourcesFn func(ctx context.Context, filter ListResourcesFilter) ([]Resource, error)
+	listSpecsFn     func(ctx context.Context, instanceIDs []int64) (map[int64]InstanceSpec, error)
 }
 
 func (s *instanceRepoStub) CreateInstance(ctx context.Context, spec InstanceSpec) error {
@@ -24,6 +25,13 @@ func (s *instanceRepoStub) ListResources(ctx context.Context, filter ListResourc
 		return nil, s.err
 	}
 	return s.listResourcesFn(ctx, filter)
+}
+
+func (s *instanceRepoStub) ListResourceSpecs(ctx context.Context, instanceIDs []int64) (map[int64]InstanceSpec, error) {
+	if s.listSpecsFn == nil {
+		return nil, s.err
+	}
+	return s.listSpecsFn(ctx, instanceIDs)
 }
 
 type k8sRepoStub struct {

@@ -45,6 +45,8 @@ type InstanceSpec struct {
 type InstanceRepo interface {
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
 	ListResources(ctx context.Context, filter ListResourcesFilter) ([]Resource, error)
+	// ListResourceSpecs returns resource specs keyed by instance ID.
+	ListResourceSpecs(ctx context.Context, instanceIDs []int64) (map[int64]InstanceSpec, error)
 }
 
 type K8sRepo interface {
@@ -104,4 +106,9 @@ type ListResourcesFilter struct {
 func (uc *ResourceUsecase) ListResources(ctx context.Context, filter ListResourcesFilter) ([]Resource, error) {
 	uc.log.WithContext(ctx).Infof("ListResources: userID=%v type=%v start=%v end=%v", filter.UserID, filter.Type, filter.Start, filter.End)
 	return uc.InstanceSpec.ListResources(ctx, filter)
+}
+
+// ListResourceSpecs returns specs for given instance IDs.
+func (uc *ResourceUsecase) ListResourceSpecs(ctx context.Context, instanceIDs []int64) (map[int64]InstanceSpec, error) {
+	return uc.InstanceSpec.ListResourceSpecs(ctx, instanceIDs)
 }

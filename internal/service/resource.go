@@ -5,10 +5,13 @@ import (
 	mq "resource/api/mq/v1"
 	v1 "resource/api/resource/v1"
 	"resource/internal/biz"
+	"strconv"
 
 	"github.com/go-kratos/kratos/v2/errors"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -119,7 +122,9 @@ func (s *ResourceService) ListResources(ctx context.Context, in *v1.ListResource
 	}
 
 	mask := in.GetFieldMask()
+	instanceIDs := make([]int64, 0, len(resources))
 	for _, resource := range resources {
+		instanceIDs = append(instanceIDs, resource.InstanceID)
 		item := &v1.Resource{
 			InstanceId: resource.InstanceID,
 			Name:       resource.Name,
@@ -135,6 +140,32 @@ func (s *ResourceService) ListResources(ctx context.Context, in *v1.ListResource
 			}
 		}
 		reply.Resources = append(reply.Resources, item)
+	}
+
+	specs, err := s.uc.ListResourceSpecs(ctx, instanceIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(specs) > 0 {
+		reply.Specs = make(map[string]*v1.ResourceSpec, len(specs))
+		for instanceID, spec := range specs {
+			var customConfig *structpb.Struct
+			if len(spec.ConfigJSON) > 0 {
+				cfg := &structpb.Struct{}
+				if err := protojson.Unmarshal(spec.ConfigJSON, cfg); err != nil {
+					return nil, err
+				}
+				customConfig = cfg
+			}
+			reply.Specs[strconv.FormatInt(instanceID, 10)] = &v1.ResourceSpec{
+				InstanceId:   instanceID,
+				CpuCores:     spec.CPU,
+				MemorySize:   spec.Memory,
+				Gpu:          spec.GPU,
+				Image:        spec.Image,
+				CustomConfig: customConfig,
+			}
+		}
 	}
 
 	return reply, nil

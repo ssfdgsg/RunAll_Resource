@@ -45,8 +45,13 @@ message Data {
   message Kubernetes {
     string kubeconfig = 1;
   }
+  message Microservices {
+    string helloworld_addr = 1;  // helloworld 服务地址，例: localhost:9001
+    string mq_addr = 2;           // MQ 服务地址，例: localhost:9002
+  }
   Database database = 1;
   Redis redis = 2;
   RabbitMQ rabbitmq = 3;
   Kubernetes kubernetes = 4;
+  Microservices microservices = 5;
 }

@@ -31,16 +31,10 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	greeterRepo := data.NewGreeterRepo(dataData, logger)
 	greeterUsecase := biz.NewGreeterUsecase(greeterRepo, logger)
 	greeterService := service.NewGreeterService(greeterUsecase)
-	connection, cleanup2, err := data.NewRabbitMQ(confData, logger)
-	if err != nil {
-		cleanup()
-		return nil, nil, err
-	}
 	instanceRepo := data.NewResourceRepo(dataData, logger)
 	auditRepo := data.NewAuditRepo(dataData, logger)
 	k8sRepo, err := data.NewK8sRepo(confData, logger)
 	if err != nil {
-		cleanup2()
 		cleanup()
 		return nil, nil, err
 	}
@@ -48,6 +42,11 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger) (*
 	resourceService := service.NewResourceService(resourceUsecase)
 	httpServer := server.NewHTTPServer(confServer, greeterService, resourceService, logger)
 	grpcServer := server.NewGRPCServer(confServer, greeterService, resourceService, logger)
+	connection, cleanup2, err := data.NewRabbitMQ(confData, logger)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	mqServer := server.NewMQServer(confData, connection, resourceService, logger)
 	app := newApp(logger, httpServer, grpcServer, mqServer)
 	return app, func() {

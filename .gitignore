@@ -29,6 +29,7 @@ Thumbs.db
 
 # project
 *.cert
+*.crt
 *.key
 *.log
 bin/

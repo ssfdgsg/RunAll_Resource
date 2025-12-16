@@ -2,7 +2,7 @@
 GRPC localhost:9000/resource.v1.resourceService/ListResources
 
 {
-  "user_id": "4222",
+  "user_id": "7de5d3bc-c5d7-44d0-a5bb-a94be248f523",
   "type": "CREATING",
   "field_mask": "name"
 }

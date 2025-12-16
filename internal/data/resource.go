@@ -31,7 +31,7 @@ func NewResourceRepo(data *Data, logger log.Logger) biz.InstanceRepo {
 
 type instance struct {
 	InstanceID int64      `gorm:"primaryKey;column:instance_id"` // 雪花 ID: [UserID:24][TS:36][Seq:4]
-	UserID     int64      `gorm:"column:user_id"`
+	UserID     string     `gorm:"column:user_id;type:uuid;index"`
 	Name       string     `gorm:"column:name"`
 	Status     string     `gorm:"column:status"` // 核心状态机字段
 	CreatedAt  time.Time  `gorm:"column:created_at"`

@@ -25,7 +25,7 @@ service resourceService {
 message Resource {
   int64  instance_id = 1;        //实例ID
   string name = 2;               //资源名称
-  int64 user_id = 3;         //用户ID
+  string user_id = 3;         //用户ID
   string type = 4;               //资源类型
   google.protobuf.Timestamp created_at = 5;        //创建时间
   google.protobuf.Timestamp updated_at = 6;        //更新时间
@@ -42,7 +42,7 @@ message ResourceSpec{
 
 //1. 列出全部资源
 message ListResourcesReq {
-  optional int64 user_id = 1;         //用户ID
+  optional string user_id = 1;         //用户ID
   optional google.protobuf.Timestamp start = 2; //创建时间在此之后
   optional google.protobuf.Timestamp end = 3;   //创建时间在此之前
   optional string type = 4;               //资源类型

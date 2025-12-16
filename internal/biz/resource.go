@@ -33,7 +33,7 @@ type AuditRepo interface {
 
 type InstanceSpec struct {
 	InstanceID int64
-	UserID     int64
+	UserID     string
 	Name       string
 	CPU        uint32
 	Memory     uint32
@@ -88,7 +88,7 @@ func (uc *ResourceUsecase) CreateInstance(ctx context.Context, spec InstanceSpec
 type Resource struct {
 	InstanceID int64
 	Name       string
-	UserID     int64
+	UserID     string
 	Type       string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -96,7 +96,7 @@ type Resource struct {
 
 // ListResourcesFilter defines optional filters for listing resources.
 type ListResourcesFilter struct {
-	UserID *int64
+	UserID *string
 	Start  *time.Time
 	End    *time.Time
 	Type   *string

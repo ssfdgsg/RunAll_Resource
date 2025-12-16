@@ -90,7 +90,7 @@ func main() {
 
 		InstanceId: rand.Int63(),
 
-		UserId: 4222,
+		UserId: "7de5d3bc-c5d7-44d0-a5bb-a94be248f523",
 
 		Name: "demo-instance",
 

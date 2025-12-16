@@ -95,8 +95,8 @@ func TestResourceUsecase_ListResources_PassesThroughRepo(t *testing.T) {
 	uc := &ResourceUsecase{
 		InstanceSpec: &instanceRepoStub{
 			listResourcesFn: func(ctx context.Context, filter ListResourcesFilter) ([]Resource, error) {
-				if filter.UserID == nil || *filter.UserID != 7 {
-					t.Fatalf("filter.UserID=%v want=7", filter.UserID)
+				if filter.UserID == nil || *filter.UserID != "550e8400-e29b-41d4-a716-446655440000" {
+					t.Fatalf("filter.UserID=%v want=%q", filter.UserID, "550e8400-e29b-41d4-a716-446655440000")
 				}
 				if filter.Type == nil || *filter.Type != "CREATING" {
 					t.Fatalf("filter.Type=%v want=CREATING", filter.Type)
@@ -109,7 +109,7 @@ func TestResourceUsecase_ListResources_PassesThroughRepo(t *testing.T) {
 		log:       logger,
 	}
 
-	userID := int64(7)
+	userID := "550e8400-e29b-41d4-a716-446655440000"
 	typ := "CREATING"
 	got, err := uc.ListResources(context.Background(), ListResourcesFilter{UserID: &userID, Type: &typ})
 	if err != nil {

@@ -15,6 +15,8 @@ data:
     write_timeout: 0.2s
   rabbitmq:
     url: amqp://guest:guest@localhost:5672/
-    queue: greeter.hello
+    queue: resource.instance.created
+    exchange: resource.events
+    routing_key: instance.created
   kubernetes:
     kubeconfig: C:/Users/hp/.kube/config

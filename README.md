@@ -221,18 +221,6 @@ go run tests/test_mq.go -conf ./configs
 | image | string | 容器镜像 |
 | config_json | jsonb | 自定义配置 |
 
-## GPU 类型映射
-
-| 编码 | GPU 型号 |
-|------|----------|
-| 0 | 无 GPU |
-| 1 | Tesla V100 |
-| 2 | Tesla A100 |
-| 3 | Tesla H100 |
-| 4 | Tesla T4 |
-| 5 | RTX 3090 |
-| 6 | RTX 4060 Mobile |
-
 ## 许可证
 
 [MIT License](LICENSE)

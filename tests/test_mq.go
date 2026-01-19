@@ -92,7 +92,7 @@ func main() {
 
 		UserId: "7de5d3bc-c5d7-44d0-a5bb-a94be248f523",
 
-		Name: "demo-instance",
+		Name: "demo-instance-1",
 
 		Timestamp: timestamppb.Now(),
 

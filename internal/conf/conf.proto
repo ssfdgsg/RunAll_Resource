@@ -44,8 +44,11 @@ message Data {
   }
   message Kubernetes {
     string kubeconfig = 1;
-    string ingress_domain = 2;  // Ingress 默认域名（HTTP 模式）
-    string node_ip = 3;          // Node IP 地址（TCP/UDP 模式）
+    string ingress_domain = 2;                // Ingress 默认域名（HTTP 模式）
+    string ingress_nginx_namespace = 3;       // ingress-nginx 所在命名空间
+    string ingress_nginx_lb_service = 4;      // ingress-nginx LoadBalancer Service 名称
+    uint32 tcp_udp_port_range_start = 5;      // TCP/UDP 外部端口范围起始
+    uint32 tcp_udp_port_range_end = 6;        // TCP/UDP 外部端口范围结束
   }
   Database database = 1;
   Redis redis = 2;

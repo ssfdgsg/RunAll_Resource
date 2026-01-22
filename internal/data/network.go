@@ -26,20 +26,20 @@ func NewNetworkRepo(data *Data, logger log.Logger) biz.NetworkRepo {
 
 // instanceNetwork 实例网络配置表，记录端口暴露信息
 // 支持两种暴露模式：
-//  1. TCP/UDP: 通过 NodePort Service 暴露，使用 NodePort
-//  2. HTTP: 通过 Ingress 暴露，使用 IngressName
+//  1. TCP/UDP: 通过 ClusterIP Service + ingress-nginx ConfigMap 暴露，使用 ExternalPort
+//  2. HTTP: 通过 ClusterIP Service + Ingress 暴露，使用 IngressName
 type instanceNetwork struct {
-	InstanceID  int64     `gorm:"primaryKey;column:instance_id;not null"` // 实例ID
-	Port        uint32    `gorm:"primaryKey;column:port;not null"`        // 容器端口 (targetPort)
-	ServiceName string    `gorm:"column:service_name;size:64;not null"`   // K8s Service 名称
-	ServicePort uint32    `gorm:"column:service_port;not null"`           // Service 暴露的端口
-	NodePort    *uint32   `gorm:"column:node_port"`                       // TCP/UDP 模式的 NodePort
-	IngressName *string   `gorm:"column:ingress_name;size:64"`            // HTTP 模式的 Ingress 名称
-	Protocol    string    `gorm:"column:protocol;default:'HTTP'"`         // TCP/UDP/HTTP
-	AccessURL   string    `gorm:"column:access_url;not null"`             // 最终访问地址
-	Enabled     bool      `gorm:"column:enabled;default:true"`            // 是否启用
-	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	InstanceID   int64     `gorm:"primaryKey;column:instance_id;not null"` // 实例ID
+	Port         uint32    `gorm:"primaryKey;column:port;not null"`        // 容器端口 (targetPort)
+	ServiceName  string    `gorm:"column:service_name;size:64;not null"`   // K8s Service 名称
+	ServicePort  uint32    `gorm:"column:service_port;not null"`           // Service 暴露的端口
+	ExternalPort *uint32   `gorm:"column:external_port"`                   // TCP/UDP 模式的外部端口（ConfigMap key）
+	IngressName  *string   `gorm:"column:ingress_name;size:64"`            // HTTP 模式的 Ingress 名称
+	Protocol     string    `gorm:"column:protocol;default:'HTTP'"`         // TCP/UDP/HTTP
+	AccessURL    string    `gorm:"column:access_url;not null"`             // 最终访问地址
+	Enabled      bool      `gorm:"column:enabled;default:true"`            // 是否启用
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (instanceNetwork) TableName() string { return "instance_network" }
@@ -47,15 +47,15 @@ func (instanceNetwork) TableName() string { return "instance_network" }
 // CreateNetworkBinding 创建端口绑定记录
 func (r *networkRepo) CreateNetworkBinding(ctx context.Context, binding biz.NetworkBinding) error {
 	network := &instanceNetwork{
-		InstanceID:  binding.InstanceID,
-		Port:        binding.Port,
-		ServiceName: binding.ServiceName,
-		ServicePort: binding.ServicePort,
-		NodePort:    binding.NodePort,
-		IngressName: binding.IngressName,
-		Protocol:    binding.Protocol,
-		AccessURL:   binding.AccessURL,
-		Enabled:     binding.Enabled,
+		InstanceID:   binding.InstanceID,
+		Port:         binding.Port,
+		ServiceName:  binding.ServiceName,
+		ServicePort:  binding.ServicePort,
+		ExternalPort: binding.ExternalPort,
+		IngressName:  binding.IngressName,
+		Protocol:     binding.Protocol,
+		AccessURL:    binding.AccessURL,
+		Enabled:      binding.Enabled,
 	}
 
 	if err := r.data.db.WithContext(ctx).Create(network).Error; err != nil {
@@ -69,14 +69,14 @@ func (r *networkRepo) CreateNetworkBinding(ctx context.Context, binding biz.Netw
 // UpdateNetworkBinding 更新端口绑定记录
 func (r *networkRepo) UpdateNetworkBinding(ctx context.Context, binding biz.NetworkBinding) error {
 	updates := map[string]interface{}{
-		"service_name": binding.ServiceName,
-		"service_port": binding.ServicePort,
-		"node_port":    binding.NodePort,
-		"ingress_name": binding.IngressName,
-		"protocol":     binding.Protocol,
-		"access_url":   binding.AccessURL,
-		"enabled":      binding.Enabled,
-		"updated_at":   time.Now(),
+		"service_name":  binding.ServiceName,
+		"service_port":  binding.ServicePort,
+		"external_port": binding.ExternalPort,
+		"ingress_name":  binding.IngressName,
+		"protocol":      binding.Protocol,
+		"access_url":    binding.AccessURL,
+		"enabled":       binding.Enabled,
+		"updated_at":    time.Now(),
 	}
 
 	result := r.data.db.WithContext(ctx).
@@ -130,17 +130,17 @@ func (r *networkRepo) GetNetworkBinding(ctx context.Context, instanceID int64, p
 	}
 
 	return &biz.NetworkBinding{
-		InstanceID:  network.InstanceID,
-		Port:        network.Port,
-		ServiceName: network.ServiceName,
-		ServicePort: network.ServicePort,
-		NodePort:    network.NodePort,
-		IngressName: network.IngressName,
-		Protocol:    network.Protocol,
-		AccessURL:   network.AccessURL,
-		Enabled:     network.Enabled,
-		CreatedAt:   network.CreatedAt,
-		UpdatedAt:   network.UpdatedAt,
+		InstanceID:   network.InstanceID,
+		Port:         network.Port,
+		ServiceName:  network.ServiceName,
+		ServicePort:  network.ServicePort,
+		ExternalPort: network.ExternalPort,
+		IngressName:  network.IngressName,
+		Protocol:     network.Protocol,
+		AccessURL:    network.AccessURL,
+		Enabled:      network.Enabled,
+		CreatedAt:    network.CreatedAt,
+		UpdatedAt:    network.UpdatedAt,
 	}, nil
 }
 
@@ -160,17 +160,17 @@ func (r *networkRepo) ListNetworkBindings(ctx context.Context, instanceID int64)
 	bindings := make([]biz.NetworkBinding, 0, len(networks))
 	for _, network := range networks {
 		bindings = append(bindings, biz.NetworkBinding{
-			InstanceID:  network.InstanceID,
-			Port:        network.Port,
-			ServiceName: network.ServiceName,
-			ServicePort: network.ServicePort,
-			NodePort:    network.NodePort,
-			IngressName: network.IngressName,
-			Protocol:    network.Protocol,
-			AccessURL:   network.AccessURL,
-			Enabled:     network.Enabled,
-			CreatedAt:   network.CreatedAt,
-			UpdatedAt:   network.UpdatedAt,
+			InstanceID:   network.InstanceID,
+			Port:         network.Port,
+			ServiceName:  network.ServiceName,
+			ServicePort:  network.ServicePort,
+			ExternalPort: network.ExternalPort,
+			IngressName:  network.IngressName,
+			Protocol:     network.Protocol,
+			AccessURL:    network.AccessURL,
+			Enabled:      network.Enabled,
+			CreatedAt:    network.CreatedAt,
+			UpdatedAt:    network.UpdatedAt,
 		})
 	}
 

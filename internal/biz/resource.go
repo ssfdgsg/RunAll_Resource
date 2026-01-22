@@ -57,8 +57,8 @@ type InstanceRepo interface {
 type K8sRepo interface {
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
 
-	// CreateServiceForTCPUDP creates a NodePort Service for TCP/UDP protocols
-	// Returns: serviceName, nodePort, error
+	// CreateServiceForTCPUDP creates a ClusterIP Service for TCP/UDP protocols and patches ingress-nginx ConfigMap
+	// Returns: serviceName, externalPort, error
 	CreateServiceForTCPUDP(ctx context.Context, namespace, instanceID string, port uint32, protocol string) (string, uint32, error)
 
 	// CreateServiceForHTTP creates a ClusterIP Service for HTTP protocol
@@ -67,6 +67,9 @@ type K8sRepo interface {
 
 	// DeleteService deletes a Service by name
 	DeleteService(ctx context.Context, namespace, serviceName string) error
+
+	// DeleteTCPUDPConfigMapEntry deletes a TCP/UDP ConfigMap entry
+	DeleteTCPUDPConfigMapEntry(ctx context.Context, protocol string, externalPort uint32) error
 
 	// CreateIngress creates an Ingress for HTTP access
 	// Returns: ingressName, accessURL, error
@@ -78,8 +81,8 @@ type K8sRepo interface {
 	// GetIngressDomain returns the configured ingress domain
 	GetIngressDomain() string
 
-	// GetNodeIP returns the configured node IP
-	GetNodeIP() string
+	// GetIngressNginxLBIP returns the ingress-nginx LoadBalancer External IP
+	GetIngressNginxLBIP(ctx context.Context) (string, error)
 }
 
 // ExecRepo K8s exec 操作接口
@@ -132,20 +135,20 @@ const (
 
 // NetworkBinding 网络绑定信息
 // 支持两种暴露模式：
-//  1. TCP/UDP: 通过 NodePort Service 暴露，NodePort 字段有值
-//  2. HTTP: 通过 Ingress 暴露，IngressName 字段有值
+//  1. TCP/UDP: 通过 ClusterIP Service + ingress-nginx ConfigMap 暴露，ExternalPort 字段有值
+//  2. HTTP: 通过 ClusterIP Service + Ingress 暴露，IngressName 字段有值
 type NetworkBinding struct {
-	InstanceID  int64
-	Port        uint32
-	ServiceName string
-	ServicePort uint32
-	NodePort    *uint32 // TCP/UDP 模式下的 NodePort (30000-32767)
-	IngressName *string // HTTP 模式下的 Ingress 名称
-	Protocol    string  // TCP/UDP/HTTP
-	AccessURL   string
-	Enabled     bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	InstanceID   int64
+	Port         uint32
+	ServiceName  string
+	ServicePort  uint32
+	ExternalPort *uint32 // TCP/UDP 模式下的外部端口（ConfigMap key）
+	IngressName  *string // HTTP 模式下的 Ingress 名称
+	Protocol     string  // TCP/UDP/HTTP
+	AccessURL    string
+	Enabled      bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // NetworkRepo 网络配置仓储接口
@@ -271,27 +274,27 @@ func (uc *ResourceUsecase) openPort(ctx context.Context, instanceID int64, insta
 
 	var accessURL string
 	var serviceName string
-	var nodePort *uint32
+	var externalPort *uint32
 	var ingressName *string
 
 	// 根据协议选择暴露模式
 	switch protocol {
 	case "TCP", "UDP":
-		// TCP/UDP 模式：创建 NodePort Service
-		svcName, allocatedNodePort, err := uc.K8sRepo.CreateServiceForTCPUDP(ctx, namespace, instanceIDStr, port, protocol)
+		// TCP/UDP 模式：创建 ClusterIP Service + patch ingress-nginx ConfigMap
+		svcName, allocatedExternalPort, err := uc.K8sRepo.CreateServiceForTCPUDP(ctx, namespace, instanceIDStr, port, protocol)
 		if err != nil {
 			return "", err
 		}
 		serviceName = svcName
-		nodePort = &allocatedNodePort
+		externalPort = &allocatedExternalPort
 
-		// 生成访问 URL
-		nodeIP := uc.K8sRepo.GetNodeIP()
-		if nodeIP == "" {
-			uc.log.Warnf("node_ip not configured, using placeholder")
-			nodeIP = "<node-ip>"
+		// 获取 ingress-nginx LoadBalancer IP
+		lbIP, err := uc.K8sRepo.GetIngressNginxLBIP(ctx)
+		if err != nil {
+			uc.log.Warnf("failed to get ingress-nginx LB IP: %v, using placeholder", err)
+			lbIP = "<ingress-lb-ip>"
 		}
-		accessURL = fmt.Sprintf("%s:%d", nodeIP, allocatedNodePort)
+		accessURL = fmt.Sprintf("%s:%d", lbIP, allocatedExternalPort)
 
 	case "HTTP":
 		// HTTP 模式：创建 ClusterIP Service + Ingress
@@ -316,15 +319,15 @@ func (uc *ResourceUsecase) openPort(ctx context.Context, instanceID int64, insta
 
 	// 持久化网络配置
 	binding := NetworkBinding{
-		InstanceID:  instanceID,
-		Port:        port,
-		ServiceName: serviceName,
-		ServicePort: port,
-		NodePort:    nodePort,
-		IngressName: ingressName,
-		Protocol:    protocol,
-		AccessURL:   accessURL,
-		Enabled:     true,
+		InstanceID:   instanceID,
+		Port:         port,
+		ServiceName:  serviceName,
+		ServicePort:  port,
+		ExternalPort: externalPort,
+		IngressName:  ingressName,
+		Protocol:     protocol,
+		AccessURL:    accessURL,
+		Enabled:      true,
 	}
 
 	if err := uc.NetworkRepo.CreateNetworkBinding(ctx, binding); err != nil {
@@ -332,6 +335,9 @@ func (uc *ResourceUsecase) openPort(ctx context.Context, instanceID int64, insta
 		_ = uc.K8sRepo.DeleteService(ctx, namespace, serviceName)
 		if ingressName != nil {
 			_ = uc.K8sRepo.DeleteIngress(ctx, namespace, *ingressName)
+		}
+		if externalPort != nil {
+			_ = uc.K8sRepo.DeleteTCPUDPConfigMapEntry(ctx, protocol, *externalPort)
 		}
 		return "", err
 	}
@@ -364,13 +370,21 @@ func (uc *ResourceUsecase) closePort(ctx context.Context, instanceID int64, name
 	// 删除 K8s Service
 	if err := uc.K8sRepo.DeleteService(ctx, namespace, binding.ServiceName); err != nil {
 		uc.log.Errorf("failed to delete service %s: %v", binding.ServiceName, err)
-		// 继续删除 Ingress
+		// 继续删除其他资源
 	}
 
 	// 删除 K8s Ingress（如果存在）
 	if binding.IngressName != nil {
 		if err := uc.K8sRepo.DeleteIngress(ctx, namespace, *binding.IngressName); err != nil {
 			uc.log.Errorf("failed to delete ingress %s: %v", *binding.IngressName, err)
+			// 继续删除其他资源
+		}
+	}
+
+	// 删除 TCP/UDP ConfigMap 条目（如果存在）
+	if binding.ExternalPort != nil {
+		if err := uc.K8sRepo.DeleteTCPUDPConfigMapEntry(ctx, binding.Protocol, *binding.ExternalPort); err != nil {
+			uc.log.Errorf("failed to delete ConfigMap entry for port %d: %v", *binding.ExternalPort, err)
 			// 继续删除数据库记录
 		}
 	}

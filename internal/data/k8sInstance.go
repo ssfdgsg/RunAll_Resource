@@ -2,11 +2,11 @@ package data
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"resource/internal/biz"
 	"resource/internal/conf"
 	"strconv"
+	"strings"
 
 	"github.com/go-kratos/kratos/v2/log"
 	appsv1 "k8s.io/api/apps/v1"
@@ -36,11 +36,15 @@ var gpuTypeMap = map[uint32]gpuInfo{
 }
 
 type k8sRepo struct {
-	client        kubernetes.Interface
-	config        *rest.Config
-	log           *log.Helper
-	ingressDomain string
-	nodeIP        string
+	client                kubernetes.Interface
+	config                *rest.Config
+	log                   *log.Helper
+	ingressDomain         string
+	ingressNginxNamespace string
+	ingressNginxLBService string
+	tcpUDPPortRangeStart  uint32
+	tcpUDPPortRangeEnd    uint32
+	nextAvailablePort     uint32 // 简单的端口分配计数器（生产环境需要更复杂的端口池管理）
 }
 
 // NewK8sRepo bootstraps a Kubernetes repo with a shared kubeconfig.
@@ -48,64 +52,47 @@ func NewK8sRepo(c *conf.Data, k8sClient *K8sClient, logger log.Logger) (biz.K8sR
 	helper := log.NewHelper(logger)
 
 	// 获取配置
-	var ingressDomain, nodeIP string
+	var ingressDomain, ingressNginxNamespace, ingressNginxLBService string
+	var tcpUDPPortRangeStart, tcpUDPPortRangeEnd uint32
+
 	if c.GetKubernetes() != nil {
-		ingressDomain = c.GetKubernetes().GetIngressDomain()
-		nodeIP = c.GetKubernetes().GetNodeIp()
+		k8sConf := c.GetKubernetes()
+		ingressDomain = k8sConf.GetIngressDomain()
+		ingressNginxNamespace = k8sConf.GetIngressNginxNamespace()
+		ingressNginxLBService = k8sConf.GetIngressNginxLbService()
+		tcpUDPPortRangeStart = k8sConf.GetTcpUdpPortRangeStart()
+		tcpUDPPortRangeEnd = k8sConf.GetTcpUdpPortRangeEnd()
 	}
 
-	// 如果未配置，尝试自动获取（适用于 minikube 等本地环境）
-	if nodeIP == "" {
-		var err error
-		nodeIP, err = getMinikubeIP(k8sClient.Client)
-		if err != nil {
-			helper.Warnf("failed to auto-detect node IP: %v, using localhost", err)
-			nodeIP = "127.0.0.1"
-		} else {
-			helper.Infof("auto-detected node IP: %s", nodeIP)
-		}
+	// 设置默认值
+	if ingressDomain == "" {
+		ingressDomain = "demo.localtest.me"
+		helper.Infof("using default ingress domain: %s", ingressDomain)
 	}
-
-	// 如果未配置 ingress domain，使用 nip.io 魔法域名
-	if ingressDomain == "" && nodeIP != "" {
-		ingressDomain = fmt.Sprintf("%s.nip.io", nodeIP)
-		helper.Infof("using nip.io domain: %s", ingressDomain)
+	if ingressNginxNamespace == "" {
+		ingressNginxNamespace = "ingress-nginx"
+	}
+	if ingressNginxLBService == "" {
+		ingressNginxLBService = "ingress-nginx-controller"
+	}
+	if tcpUDPPortRangeStart == 0 {
+		tcpUDPPortRangeStart = 30000
+	}
+	if tcpUDPPortRangeEnd == 0 {
+		tcpUDPPortRangeEnd = 32767
 	}
 
 	return &k8sRepo{
-		client:        k8sClient.Client,
-		config:        k8sClient.Config,
-		log:           helper,
-		ingressDomain: ingressDomain,
-		nodeIP:        nodeIP,
+		client:                k8sClient.Client,
+		config:                k8sClient.Config,
+		log:                   helper,
+		ingressDomain:         ingressDomain,
+		ingressNginxNamespace: ingressNginxNamespace,
+		ingressNginxLBService: ingressNginxLBService,
+		tcpUDPPortRangeStart:  tcpUDPPortRangeStart,
+		tcpUDPPortRangeEnd:    tcpUDPPortRangeEnd,
+		nextAvailablePort:     tcpUDPPortRangeStart, // 初始化端口计数器
 	}, nil
-}
-
-// getMinikubeIP attempts to get the first node's external or internal IP.
-func getMinikubeIP(client kubernetes.Interface) (string, error) {
-	nodes, err := client.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return "", err
-	}
-	if len(nodes.Items) == 0 {
-		return "", errors.New("no nodes found")
-	}
-
-	// 尝试获取第一个节点的 IP
-	node := nodes.Items[0]
-	for _, addr := range node.Status.Addresses {
-		// 优先使用 ExternalIP，其次 InternalIP
-		if addr.Type == corev1.NodeExternalIP && addr.Address != "" {
-			return addr.Address, nil
-		}
-	}
-	for _, addr := range node.Status.Addresses {
-		if addr.Type == corev1.NodeInternalIP && addr.Address != "" {
-			return addr.Address, nil
-		}
-	}
-
-	return "", errors.New("no valid IP address found for node")
 }
 
 // ensureNamespace 确保指定的 namespace 存在，如果不存在则创建
@@ -229,25 +216,28 @@ func (r *k8sRepo) CreateInstance(ctx context.Context, spec biz.InstanceSpec) err
 	return nil
 }
 
-// CreateServiceForTCPUDP creates a NodePort Service for TCP/UDP protocols.
-// Returns the service name and the allocated NodePort.
+// CreateServiceForTCPUDP creates a ClusterIP Service for TCP/UDP protocols and patches ingress-nginx ConfigMap.
+// Returns the service name and the allocated external port.
 func (r *k8sRepo) CreateServiceForTCPUDP(ctx context.Context, namespace, instanceID string, port uint32, protocol string) (string, uint32, error) {
 	serviceName := generateServiceName(instanceID, port)
 
-	r.log.WithContext(ctx).Infof("creating NodePort service %s in namespace %s for port %d with protocol %s", serviceName, namespace, port, protocol)
+	r.log.WithContext(ctx).Infof("creating ClusterIP service %s in namespace %s for port %d with protocol %s", serviceName, namespace, port, protocol)
 
 	// 验证协议
 	var k8sProtocol corev1.Protocol
+	var configMapName string
 	switch protocol {
 	case "TCP":
 		k8sProtocol = corev1.ProtocolTCP
+		configMapName = "tcp-services"
 	case "UDP":
 		k8sProtocol = corev1.ProtocolUDP
+		configMapName = "udp-services"
 	default:
 		return "", 0, fmt.Errorf("invalid protocol %s, must be TCP or UDP", protocol)
 	}
 
-	// 构建 Service 对象
+	// 1. 创建 ClusterIP Service
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceName,
@@ -258,7 +248,7 @@ func (r *k8sRepo) CreateServiceForTCPUDP(ctx context.Context, namespace, instanc
 			},
 		},
 		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeNodePort,
+			Type:     corev1.ServiceTypeClusterIP,
 			Selector: getPodSelector(instanceID),
 			Ports: []corev1.ServicePort{
 				{
@@ -266,32 +256,50 @@ func (r *k8sRepo) CreateServiceForTCPUDP(ctx context.Context, namespace, instanc
 					Protocol:   k8sProtocol,
 					Port:       int32(port),
 					TargetPort: intstr.FromInt32(int32(port)),
-					// NodePort 不指定，让 K8s 自动分配
 				},
 			},
 		},
 	}
 
-	// 调用 K8s API 创建 Service
-	createdService, err := r.client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
+	_, err := r.client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
 	if err != nil {
-		r.log.Errorf("failed to create NodePort service %s: %v", serviceName, err)
+		r.log.Errorf("failed to create ClusterIP service %s: %v", serviceName, err)
 		return "", 0, fmt.Errorf("failed to create service: %w", err)
 	}
 
-	// 获取 K8s 分配的 NodePort
-	if len(createdService.Spec.Ports) == 0 {
-		return "", 0, fmt.Errorf("service created but no ports found")
+	r.log.WithContext(ctx).Infof("ClusterIP service %s created successfully", serviceName)
+
+	// 2. 分配外部端口（简单实现：自增）
+	externalPort := r.allocateExternalPort()
+	if externalPort == 0 {
+		// 端口池耗尽，回滚 Service
+		_ = r.client.CoreV1().Services(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{})
+		return "", 0, fmt.Errorf("external port pool exhausted")
 	}
 
-	allocatedNodePort := createdService.Spec.Ports[0].NodePort
-	if allocatedNodePort == 0 {
-		return "", 0, fmt.Errorf("service created but NodePort not allocated")
+	// 3. Patch ingress-nginx ConfigMap
+	configMapKey := fmt.Sprintf("%d", externalPort)
+	configMapValue := fmt.Sprintf("%s/%s:%d", namespace, serviceName, port)
+
+	err = r.patchIngressNginxConfigMap(ctx, configMapName, configMapKey, configMapValue)
+	if err != nil {
+		// ConfigMap patch 失败，回滚 Service
+		_ = r.client.CoreV1().Services(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{})
+		return "", 0, fmt.Errorf("failed to patch ConfigMap: %w", err)
 	}
 
-	r.log.WithContext(ctx).Infof("NodePort service %s created successfully, allocated NodePort: %d", serviceName, allocatedNodePort)
+	// 4. Patch ingress-nginx Service 添加端口
+	err = r.patchIngressNginxServicePort(ctx, externalPort, protocol)
+	if err != nil {
+		// Service patch 失败，回滚 ConfigMap 和 Service
+		_ = r.DeleteTCPUDPConfigMapEntry(ctx, protocol, externalPort)
+		_ = r.client.CoreV1().Services(namespace).Delete(ctx, serviceName, metav1.DeleteOptions{})
+		return "", 0, fmt.Errorf("failed to patch ingress-nginx Service: %w", err)
+	}
 
-	return serviceName, uint32(allocatedNodePort), nil
+	r.log.WithContext(ctx).Infof("TCP/UDP service %s exposed on external port %d", serviceName, externalPort)
+
+	return serviceName, externalPort, nil
 }
 
 // CreateServiceForHTTP creates a ClusterIP Service for HTTP protocol.
@@ -468,12 +476,6 @@ func generateAccessURL(ingressDomain, namespace, instanceID string, port uint32)
 	return fmt.Sprintf("http://%s/%s/%s/%d", ingressDomain, namespace, instanceID, port)
 }
 
-// generateTCPUDPAccessURL generates the access URL for TCP/UDP NodePort.
-// Format: {nodeIP}:{nodePort}
-func generateTCPUDPAccessURL(nodeIP string, nodePort uint32) string {
-	return fmt.Sprintf("%s:%d", nodeIP, nodePort)
-}
-
 // getPodSelector returns the label selector for matching Pods.
 func getPodSelector(instanceID string) map[string]string {
 	return map[string]string{
@@ -487,9 +489,196 @@ func (r *k8sRepo) GetIngressDomain() string {
 	return r.ingressDomain
 }
 
-// GetNodeIP returns the configured node IP.
-func (r *k8sRepo) GetNodeIP() string {
-	return r.nodeIP
+// GetIngressNginxLBIP returns the ingress-nginx LoadBalancer External IP.
+func (r *k8sRepo) GetIngressNginxLBIP(ctx context.Context) (string, error) {
+	svc, err := r.client.CoreV1().Services(r.ingressNginxNamespace).Get(ctx, r.ingressNginxLBService, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get ingress-nginx service: %w", err)
+	}
+
+	// 获取 LoadBalancer 的 External IP
+	if len(svc.Status.LoadBalancer.Ingress) > 0 {
+		if svc.Status.LoadBalancer.Ingress[0].IP != "" {
+			return svc.Status.LoadBalancer.Ingress[0].IP, nil
+		}
+		if svc.Status.LoadBalancer.Ingress[0].Hostname != "" {
+			return svc.Status.LoadBalancer.Ingress[0].Hostname, nil
+		}
+	}
+
+	return "", fmt.Errorf("ingress-nginx LoadBalancer has no external IP")
+}
+
+// allocateExternalPort allocates an external port from the port pool.
+// 简单实现：自增分配，不考虑回收和重用。
+func (r *k8sRepo) allocateExternalPort() uint32 {
+	if r.nextAvailablePort > r.tcpUDPPortRangeEnd {
+		r.log.Errorf("external port pool exhausted: %d > %d", r.nextAvailablePort, r.tcpUDPPortRangeEnd)
+		return 0
+	}
+	port := r.nextAvailablePort
+	r.nextAvailablePort++
+	return port
+}
+
+// patchIngressNginxConfigMap patches the ingress-nginx tcp-services or udp-services ConfigMap.
+func (r *k8sRepo) patchIngressNginxConfigMap(ctx context.Context, configMapName, key, value string) error {
+	r.log.WithContext(ctx).Infof("patching ConfigMap %s/%s: %s=%s", r.ingressNginxNamespace, configMapName, key, value)
+
+	// 获取 ConfigMap
+	cm, err := r.client.CoreV1().ConfigMaps(r.ingressNginxNamespace).Get(ctx, configMapName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get ConfigMap %s: %w", configMapName, err)
+	}
+
+	// 初始化 Data 字段（如果为空）
+	if cm.Data == nil {
+		cm.Data = make(map[string]string)
+	}
+
+	// 添加或更新条目
+	cm.Data[key] = value
+
+	// 更新 ConfigMap
+	_, err = r.client.CoreV1().ConfigMaps(r.ingressNginxNamespace).Update(ctx, cm, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update ConfigMap %s: %w", configMapName, err)
+	}
+
+	r.log.WithContext(ctx).Infof("ConfigMap %s/%s patched successfully", r.ingressNginxNamespace, configMapName)
+	return nil
+}
+
+// patchIngressNginxServicePort patches the ingress-nginx Service to add a TCP/UDP port.
+func (r *k8sRepo) patchIngressNginxServicePort(ctx context.Context, externalPort uint32, protocol string) error {
+	r.log.WithContext(ctx).Infof("patching ingress-nginx Service to add port %d (%s)", externalPort, protocol)
+
+	// 获取 ingress-nginx Service
+	svc, err := r.client.CoreV1().Services(r.ingressNginxNamespace).Get(ctx, r.ingressNginxLBService, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get ingress-nginx Service: %w", err)
+	}
+
+	// 检查端口是否已存在
+	portName := fmt.Sprintf("%s-%d", strings.ToLower(protocol), externalPort)
+	for _, p := range svc.Spec.Ports {
+		if p.Port == int32(externalPort) && string(p.Protocol) == protocol {
+			r.log.WithContext(ctx).Infof("port %d already exists in ingress-nginx Service", externalPort)
+			return nil
+		}
+	}
+
+	// 添加新端口
+	var k8sProtocol corev1.Protocol
+	if protocol == "TCP" {
+		k8sProtocol = corev1.ProtocolTCP
+	} else {
+		k8sProtocol = corev1.ProtocolUDP
+	}
+
+	newPort := corev1.ServicePort{
+		Name:       portName,
+		Protocol:   k8sProtocol,
+		Port:       int32(externalPort),
+		TargetPort: intstr.FromInt32(int32(externalPort)),
+	}
+
+	svc.Spec.Ports = append(svc.Spec.Ports, newPort)
+
+	// 更新 Service
+	_, err = r.client.CoreV1().Services(r.ingressNginxNamespace).Update(ctx, svc, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update ingress-nginx Service: %w", err)
+	}
+
+	r.log.WithContext(ctx).Infof("ingress-nginx Service patched successfully, added port %d", externalPort)
+	return nil
+}
+
+// DeleteTCPUDPConfigMapEntry deletes a TCP/UDP ConfigMap entry and removes the port from ingress-nginx Service.
+func (r *k8sRepo) DeleteTCPUDPConfigMapEntry(ctx context.Context, protocol string, externalPort uint32) error {
+	var configMapName string
+	switch protocol {
+	case "TCP":
+		configMapName = "tcp-services"
+	case "UDP":
+		configMapName = "udp-services"
+	default:
+		return fmt.Errorf("invalid protocol %s, must be TCP or UDP", protocol)
+	}
+
+	r.log.WithContext(ctx).Infof("deleting ConfigMap entry %s/%s: %d", r.ingressNginxNamespace, configMapName, externalPort)
+
+	// 1. 删除 ConfigMap 条目
+	cm, err := r.client.CoreV1().ConfigMaps(r.ingressNginxNamespace).Get(ctx, configMapName, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			r.log.WithContext(ctx).Infof("ConfigMap %s not found, already deleted", configMapName)
+			return nil
+		}
+		return fmt.Errorf("failed to get ConfigMap %s: %w", configMapName, err)
+	}
+
+	// 删除条目
+	if cm.Data != nil {
+		key := fmt.Sprintf("%d", externalPort)
+		delete(cm.Data, key)
+
+		// 更新 ConfigMap
+		_, err = r.client.CoreV1().ConfigMaps(r.ingressNginxNamespace).Update(ctx, cm, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update ConfigMap %s: %w", configMapName, err)
+		}
+
+		r.log.WithContext(ctx).Infof("ConfigMap entry deleted successfully")
+	}
+
+	// 2. 从 ingress-nginx Service 删除端口
+	err = r.removeIngressNginxServicePort(ctx, externalPort, protocol)
+	if err != nil {
+		r.log.Warnf("failed to remove port from ingress-nginx Service: %v", err)
+		// 不返回错误，因为 ConfigMap 已经删除了
+	}
+
+	return nil
+}
+
+// removeIngressNginxServicePort removes a TCP/UDP port from the ingress-nginx Service.
+func (r *k8sRepo) removeIngressNginxServicePort(ctx context.Context, externalPort uint32, protocol string) error {
+	r.log.WithContext(ctx).Infof("removing port %d (%s) from ingress-nginx Service", externalPort, protocol)
+
+	// 获取 ingress-nginx Service
+	svc, err := r.client.CoreV1().Services(r.ingressNginxNamespace).Get(ctx, r.ingressNginxLBService, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get ingress-nginx Service: %w", err)
+	}
+
+	// 查找并删除端口
+	newPorts := []corev1.ServicePort{}
+	found := false
+	for _, p := range svc.Spec.Ports {
+		if p.Port == int32(externalPort) && string(p.Protocol) == protocol {
+			found = true
+			r.log.WithContext(ctx).Infof("found port %d to remove", externalPort)
+			continue // 跳过这个端口，不添加到 newPorts
+		}
+		newPorts = append(newPorts, p)
+	}
+
+	if !found {
+		r.log.WithContext(ctx).Infof("port %d not found in ingress-nginx Service", externalPort)
+		return nil
+	}
+
+	// 更新 Service
+	svc.Spec.Ports = newPorts
+	_, err = r.client.CoreV1().Services(r.ingressNginxNamespace).Update(ctx, svc, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update ingress-nginx Service: %w", err)
+	}
+
+	r.log.WithContext(ctx).Infof("port %d removed from ingress-nginx Service successfully", externalPort)
+	return nil
 }
 
 // stringPtr returns a pointer to the string value.

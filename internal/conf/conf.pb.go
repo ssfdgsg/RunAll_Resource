@@ -503,12 +503,15 @@ func (x *Data_RabbitMQ) GetRoutingKey() string {
 }
 
 type Data_Kubernetes struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kubeconfig    string                 `protobuf:"bytes,1,opt,name=kubeconfig,proto3" json:"kubeconfig,omitempty"`
-	IngressDomain string                 `protobuf:"bytes,2,opt,name=ingress_domain,json=ingressDomain,proto3" json:"ingress_domain,omitempty"` // Ingress 默认域名（HTTP 模式）
-	NodeIp        string                 `protobuf:"bytes,3,opt,name=node_ip,json=nodeIp,proto3" json:"node_ip,omitempty"`                      // Node IP 地址（TCP/UDP 模式）
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	Kubeconfig            string                 `protobuf:"bytes,1,opt,name=kubeconfig,proto3" json:"kubeconfig,omitempty"`
+	IngressDomain         string                 `protobuf:"bytes,2,opt,name=ingress_domain,json=ingressDomain,proto3" json:"ingress_domain,omitempty"`                             // Ingress 默认域名（HTTP 模式）
+	IngressNginxNamespace string                 `protobuf:"bytes,3,opt,name=ingress_nginx_namespace,json=ingressNginxNamespace,proto3" json:"ingress_nginx_namespace,omitempty"`   // ingress-nginx 所在命名空间
+	IngressNginxLbService string                 `protobuf:"bytes,4,opt,name=ingress_nginx_lb_service,json=ingressNginxLbService,proto3" json:"ingress_nginx_lb_service,omitempty"` // ingress-nginx LoadBalancer Service 名称
+	TcpUdpPortRangeStart  uint32                 `protobuf:"varint,5,opt,name=tcp_udp_port_range_start,json=tcpUdpPortRangeStart,proto3" json:"tcp_udp_port_range_start,omitempty"` // TCP/UDP 外部端口范围起始
+	TcpUdpPortRangeEnd    uint32                 `protobuf:"varint,6,opt,name=tcp_udp_port_range_end,json=tcpUdpPortRangeEnd,proto3" json:"tcp_udp_port_range_end,omitempty"`       // TCP/UDP 外部端口范围结束
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *Data_Kubernetes) Reset() {
@@ -555,11 +558,32 @@ func (x *Data_Kubernetes) GetIngressDomain() string {
 	return ""
 }
 
-func (x *Data_Kubernetes) GetNodeIp() string {
+func (x *Data_Kubernetes) GetIngressNginxNamespace() string {
 	if x != nil {
-		return x.NodeIp
+		return x.IngressNginxNamespace
 	}
 	return ""
+}
+
+func (x *Data_Kubernetes) GetIngressNginxLbService() string {
+	if x != nil {
+		return x.IngressNginxLbService
+	}
+	return ""
+}
+
+func (x *Data_Kubernetes) GetTcpUdpPortRangeStart() uint32 {
+	if x != nil {
+		return x.TcpUdpPortRangeStart
+	}
+	return 0
+}
+
+func (x *Data_Kubernetes) GetTcpUdpPortRangeEnd() uint32 {
+	if x != nil {
+		return x.TcpUdpPortRangeEnd
+	}
+	return 0
 }
 
 var File_conf_conf_proto protoreflect.FileDescriptor
@@ -581,7 +605,7 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x04GRPC\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xb0\x05\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xf5\x06\n" +
 	"\x04Data\x125\n" +
 	"\bdatabase\x18\x01 \x01(\v2\x19.kratos.api.Data.DatabaseR\bdatabase\x12,\n" +
 	"\x05redis\x18\x02 \x01(\v2\x16.kratos.api.Data.RedisR\x05redis\x125\n" +
@@ -602,14 +626,17 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x05queue\x18\x02 \x01(\tR\x05queue\x12\x1a\n" +
 	"\bexchange\x18\x03 \x01(\tR\bexchange\x12\x1f\n" +
 	"\vrouting_key\x18\x04 \x01(\tR\n" +
-	"routingKey\x1al\n" +
+	"routingKey\x1a\xb0\x02\n" +
 	"\n" +
 	"Kubernetes\x12\x1e\n" +
 	"\n" +
 	"kubeconfig\x18\x01 \x01(\tR\n" +
 	"kubeconfig\x12%\n" +
-	"\x0eingress_domain\x18\x02 \x01(\tR\ringressDomain\x12\x17\n" +
-	"\anode_ip\x18\x03 \x01(\tR\x06nodeIpB\x1dZ\x1bresource/internal/conf;confb\x06proto3"
+	"\x0eingress_domain\x18\x02 \x01(\tR\ringressDomain\x126\n" +
+	"\x17ingress_nginx_namespace\x18\x03 \x01(\tR\x15ingressNginxNamespace\x127\n" +
+	"\x18ingress_nginx_lb_service\x18\x04 \x01(\tR\x15ingressNginxLbService\x126\n" +
+	"\x18tcp_udp_port_range_start\x18\x05 \x01(\rR\x14tcpUdpPortRangeStart\x122\n" +
+	"\x16tcp_udp_port_range_end\x18\x06 \x01(\rR\x12tcpUdpPortRangeEndB\x1dZ\x1bresource/internal/conf;confb\x06proto3"
 
 var (
 	file_conf_conf_proto_rawDescOnce sync.Once

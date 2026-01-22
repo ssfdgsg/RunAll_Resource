@@ -168,7 +168,7 @@ func (r *resourceRepo) GetResource(ctx context.Context, instanceID int64) (*biz.
 	var row instance
 	if err := r.data.db.WithContext(ctx).
 		Model(&instance{}).
-		Where("instance_id = ? AND deleted_at IS NULL", instanceID).
+		Where("instance_id = ?", instanceID).
 		First(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil // 返回 nil 表示未找到

@@ -20,8 +20,11 @@ data:
     routing_key: instance.created
   kubernetes:
     kubeconfig: C:/Users/hp/.kube/config
-    # Minikube 本地环境配置示例
-    # ingress_domain 留空时，将使用 minikube IP (如 192.168.49.2.nip.io)
-    # node_ip 留空时，将自动获取 minikube IP
-    ingress_domain: ""
-    node_ip: ""
+    # Ingress 域名（HTTP 模式）
+    ingress_domain: "demo.localtest.me"
+    # ingress-nginx 配置（TCP/UDP 模式）
+    ingress_nginx_namespace: "ingress-nginx"
+    ingress_nginx_lb_service: "ingress-nginx-controller"
+    # TCP/UDP 外部端口范围（通过 ConfigMap 暴露）
+    tcp_udp_port_range_start: 30000
+    tcp_udp_port_range_end: 32767

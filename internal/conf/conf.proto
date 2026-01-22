@@ -44,6 +44,8 @@ message Data {
   }
   message Kubernetes {
     string kubeconfig = 1;
+    string ingress_domain = 2;  // Ingress 默认域名（HTTP 模式）
+    string node_ip = 3;          // Node IP 地址（TCP/UDP 模式）
   }
   Database database = 1;
   Redis redis = 2;

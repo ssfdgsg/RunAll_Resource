@@ -1,7 +1,6 @@
 package server
 
 import (
-	hellov1 "resource/api/helloworld/v1"
 	resourcev1 "resource/api/resource/v1"
 	"resource/internal/conf"
 	"resource/internal/service"
@@ -12,7 +11,7 @@ import (
 )
 
 // NewHTTPServer new an HTTP server.
-func NewHTTPServer(c *conf.Server, greeter *service.GreeterService, resource *service.ResourceService, logger log.Logger) *http.Server {
+func NewHTTPServer(c *conf.Server, resource *service.ResourceService, logger log.Logger) *http.Server {
 	var opts = []http.ServerOption{
 		http.Middleware(
 			recovery.Recovery(),
@@ -28,7 +27,6 @@ func NewHTTPServer(c *conf.Server, greeter *service.GreeterService, resource *se
 		opts = append(opts, http.Timeout(c.Http.Timeout.AsDuration()))
 	}
 	srv := http.NewServer(opts...)
-	hellov1.RegisterGreeterHTTPServer(srv, greeter)
 	resourcev1.RegisterResourceServiceHTTPServer(srv, resource)
 	return srv
 }

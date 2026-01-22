@@ -1,0 +1,134 @@
+### SetInstancePort - 打开 HTTP 端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP",
+      "ingress_domain": "example.com"
+    }
+  ]
+}
+
+### SetInstancePort - 打开多个 HTTP 端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP",
+      "ingress_domain": "app1.example.com"
+    },
+    {
+      "port": 8081,
+      "protocol": "HTTP",
+      "ingress_domain": "app2.example.com"
+    }
+  ]
+}
+
+### SetInstancePort - 打开 TCP 端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 3306,
+      "protocol": "TCP"
+    }
+  ]
+}
+
+### SetInstancePort - 打开 UDP 端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 53,
+      "protocol": "UDP"
+    }
+  ]
+}
+
+### SetInstancePort - 混合协议端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP",
+      "ingress_domain": "web.example.com"
+    },
+    {
+      "port": 3306,
+      "protocol": "TCP"
+    },
+    {
+      "port": 6379,
+      "protocol": "TCP"
+    }
+  ]
+}
+
+### SetInstancePort - 关闭端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": false,
+  "port_configs": [
+    {
+      "port": 8080
+    },
+    {
+      "port": 3306
+    }
+  ]
+}
+
+### SetInstancePort - 无效端口测试 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 0,
+      "protocol": "HTTP",
+      "ingress_domain": "example.com"
+    },
+    {
+      "port": 70000,
+      "protocol": "TCP"
+    }
+  ]
+}
+
+### SetInstancePort - HTTP 缺少域名测试 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP"
+    }
+  ]
+}

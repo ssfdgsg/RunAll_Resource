@@ -19,6 +19,17 @@ service resourceService {
       get: "/v1/resources"
     };
   }
+
+  //2. 设置实例端口暴露
+  rpc SetInstancePort(SetInstancePortReq) returns (SetInstancePortResp) {
+    option (google.api.http) = {
+      post: "/v1/instances/{instance_id}/ports"
+      body: "*"
+    };
+  }
+
+  //3. 容器 Exec 双向流
+  rpc ExecContainer(stream ExecRequest) returns (stream ExecResponse);
 }
 
 //=====================实体/值对象=======================
@@ -54,3 +65,86 @@ message ListResourcesReply {
   map<string, ResourceSpec> specs = 2; //资源规格，key为instance_id
 }
 
+//2. 设置实例端口暴露
+message SetInstancePortReq {
+  int64 instance_id = 1;                //实例ID
+  bool open = 2;                        //是否打开端口（true=打开，false=关闭）
+  repeated PortConfig port_configs = 3; //端口配置列表
+}
+
+message PortConfig {
+  uint32 port = 1;                      //端口号 (1-65535)
+  string protocol = 2;                  //协议类型: TCP/UDP/HTTP，默认HTTP
+  string ingress_domain = 3;            //Ingress 域名（仅HTTP模式需要）
+}
+
+message SetInstancePortResp {
+  bool success = 1;                     //整体是否成功
+  repeated PortResult results = 2;      //每个端口的处理结果
+  string message = 3;                   //总体消息
+}
+
+message PortResult {
+  uint32 port = 1;                      //端口号
+  bool success = 2;                     //该端口是否成功
+  string access_url = 3;                //访问URL（成功时返回）
+  string error = 4;                     //错误信息（失败时返回）
+}
+
+//3. 容器 Exec 双向流
+//========== 请求消息 ==========
+message ExecRequest {
+  oneof message {
+    ExecInit init = 1;        //初始化连接
+    ExecInput input = 2;      //标准输入
+    ExecResize resize = 3;    //终端大小调整
+  }
+}
+
+//初始化消息（第一条消息必须是此类型）
+message ExecInit {
+  int64 instance_id = 1;           //实例ID
+  repeated string command = 2;      //执行的命令，如 ["/bin/bash"]
+  bool tty = 3;                     //是否分配 TTY，默认 true
+  optional string container_name = 4; //容器名称（可选，默认使用第一个容器）
+}
+
+//标准输入消息
+message ExecInput {
+  bytes data = 1;  //用户输入的数据（如键盘输入）
+}
+
+//终端大小调整消息
+message ExecResize {
+  uint32 rows = 1;  //终端行数
+  uint32 cols = 2;  //终端列数
+}
+
+//========== 响应消息 ==========
+message ExecResponse {
+  oneof message {
+    ExecOutput output = 1;    //标准输出/错误
+    ExecError error = 2;      //错误信息
+    ExecExit exit = 3;        //退出信号
+  }
+}
+
+//输出消息
+message ExecOutput {
+  enum Stream {
+    STDOUT = 0;  //标准输出
+    STDERR = 1;  //标准错误
+  }
+  Stream stream = 1;  //输出流类型
+  bytes data = 2;     //输出数据
+}
+
+//错误消息
+message ExecError {
+  string message = 1;  //错误描述
+}
+
+//退出消息
+message ExecExit {
+  int32 code = 1;  //退出码
+}

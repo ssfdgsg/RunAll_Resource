@@ -20,3 +20,8 @@ data:
     routing_key: instance.created
   kubernetes:
     kubeconfig: C:/Users/hp/.kube/config
+    # Minikube 本地环境配置示例
+    # ingress_domain 留空时，将使用 minikube IP (如 192.168.49.2.nip.io)
+    # node_ip 留空时，将自动获取 minikube IP
+    ingress_domain: ""
+    node_ip: ""

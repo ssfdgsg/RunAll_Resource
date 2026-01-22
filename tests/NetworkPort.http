@@ -1,0 +1,198 @@
+### SetInstancePort - 打开 HTTP 端口 (gRPC)
+# Instance: 5237967844223404952
+# Namespace: 550e8400-e29b-41d4-a716-446655440001
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP",
+      "ingress_domain": "app.example.com"
+    }
+  ]
+}
+
+### SetInstancePort - 打开 TCP 端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 22,
+      "protocol": "TCP"
+    }
+  ]
+}
+
+### SetInstancePort - 打开 UDP 端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 53,
+      "protocol": "UDP"
+    }
+  ]
+}
+
+### SetInstancePort - 打开多个端口 (混合协议) (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 80,
+      "protocol": "HTTP",
+      "ingress_domain": "web.example.com"
+    },
+    {
+      "port": 3306,
+      "protocol": "TCP"
+    },
+    {
+      "port": 6379,
+      "protocol": "TCP"
+    }
+  ]
+}
+
+### SetInstancePort - 关闭单个端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": false,
+  "port_configs": [
+    {
+      "port": 8080
+    }
+  ]
+}
+
+### SetInstancePort - 关闭多个端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": false,
+  "port_configs": [
+    {
+      "port": 8080
+    },
+    {
+      "port": 3306
+    },
+    {
+      "port": 6379
+    }
+  ]
+}
+
+### SetInstancePort - 幂等性测试：重复打开同一端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP",
+      "ingress_domain": "app.example.com"
+    }
+  ]
+}
+
+### SetInstancePort - 幂等性测试：重复关闭同一端口 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": false,
+  "port_configs": [
+    {
+      "port": 9999
+    }
+  ]
+}
+
+### SetInstancePort - 错误测试：无效端口号 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 0,
+      "protocol": "TCP"
+    }
+  ]
+}
+
+### SetInstancePort - 错误测试：端口号超出范围 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 70000,
+      "protocol": "TCP"
+    }
+  ]
+}
+
+### SetInstancePort - 错误测试：HTTP 协议缺少域名 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP"
+    }
+  ]
+}
+
+### SetInstancePort - 错误测试：无效协议 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 5237967844223404952,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "INVALID"
+    }
+  ]
+}
+
+### SetInstancePort - 错误测试：实例不存在 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/SetInstancePort
+
+{
+  "instance_id": 9999999999999999999,
+  "open": true,
+  "port_configs": [
+    {
+      "port": 8080,
+      "protocol": "HTTP",
+      "ingress_domain": "app.example.com"
+    }
+  ]
+}

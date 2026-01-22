@@ -3,28 +3,34 @@
 
 openapi: 3.0.3
 info:
-    title: ""
+    title: ResourceService API
     version: 0.0.1
 paths:
-    /helloworld/{name}:
-        get:
+    /v1/instances/{instanceId}/ports:
+        post:
             tags:
-                - Greeter
-            description: Sends a greeting
-            operationId: Greeter_SayHello
+                - ResourceService
+            description: 2. 设置实例端口暴露
+            operationId: ResourceService_SetInstancePort
             parameters:
-                - name: name
+                - name: instanceId
                   in: path
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/resource.v1.SetInstancePortReq'
+                required: true
             responses:
                 "200":
                     description: OK
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/helloworld.v1.HelloReply'
+                                $ref: '#/components/schemas/resource.v1.SetInstancePortResp'
     /v1/resources:
         get:
             tags:
@@ -64,12 +70,6 @@ paths:
                                 $ref: '#/components/schemas/resource.v1.ListResourcesReply'
 components:
     schemas:
-        helloworld.v1.HelloReply:
-            type: object
-            properties:
-                message:
-                    type: string
-            description: The response message containing the greetings
         resource.v1.ListResourcesReply:
             type: object
             properties:
@@ -81,6 +81,28 @@ components:
                     type: object
                     additionalProperties:
                         $ref: '#/components/schemas/resource.v1.ResourceSpec'
+        resource.v1.PortConfig:
+            type: object
+            properties:
+                port:
+                    type: integer
+                    format: uint32
+                protocol:
+                    type: string
+                ingressDomain:
+                    type: string
+        resource.v1.PortResult:
+            type: object
+            properties:
+                port:
+                    type: integer
+                    format: uint32
+                success:
+                    type: boolean
+                accessUrl:
+                    type: string
+                error:
+                    type: string
         resource.v1.Resource:
             type: object
             properties:
@@ -117,7 +139,28 @@ components:
                     type: string
                 customConfig:
                     type: object
+        resource.v1.SetInstancePortReq:
+            type: object
+            properties:
+                instanceId:
+                    type: string
+                open:
+                    type: boolean
+                portConfigs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/resource.v1.PortConfig'
+            description: 2. 设置实例端口暴露
+        resource.v1.SetInstancePortResp:
+            type: object
+            properties:
+                success:
+                    type: boolean
+                results:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/resource.v1.PortResult'
+                message:
+                    type: string
 tags:
-    - name: Greeter
-      description: The greeting service definition.
     - name: ResourceService

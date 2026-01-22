@@ -162,3 +162,26 @@ func (r *resourceRepo) CreateInstance(ctx context.Context, spec biz.InstanceSpec
 
 	return err
 }
+
+// GetResource returns a single resource by instance ID
+func (r *resourceRepo) GetResource(ctx context.Context, instanceID int64) (*biz.Resource, error) {
+	var row instance
+	if err := r.data.db.WithContext(ctx).
+		Model(&instance{}).
+		Where("instance_id = ? AND deleted_at IS NULL", instanceID).
+		First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil // 返回 nil 表示未找到
+		}
+		return nil, err
+	}
+
+	return &biz.Resource{
+		InstanceID: row.InstanceID,
+		Name:       row.Name,
+		UserID:     row.UserID,
+		Type:       row.Status,
+		CreatedAt:  row.CreatedAt,
+		UpdatedAt:  row.UpdatedAt,
+	}, nil
+}

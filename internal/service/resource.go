@@ -200,3 +200,210 @@ func applyResourceFieldMask(in *v1.Resource, mask *fieldmaskpb.FieldMask) (*v1.R
 	}
 	return out, nil
 }
+
+// SetInstancePort sets port exposure for an instance.
+func (s *ResourceService) SetInstancePort(ctx context.Context, req *v1.SetInstancePortReq) (*v1.SetInstancePortResp, error) {
+	if req == nil {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "request is required")
+	}
+
+	// 参数验证
+	if req.InstanceId == 0 {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "instance_id is required")
+	}
+	if len(req.PortConfigs) == 0 {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "port_configs is required")
+	}
+
+	// 处理每个端口配置
+	results := make([]*v1.PortResult, 0, len(req.PortConfigs))
+	successCount := 0
+
+	for _, config := range req.PortConfigs {
+		result := &v1.PortResult{
+			Port: config.Port,
+		}
+
+		// 验证端口范围
+		if config.Port == 0 || config.Port > 65535 {
+			result.Success = false
+			result.Error = "invalid port number, must be 1-65535"
+			results = append(results, result)
+			continue
+		}
+
+		// 协议默认值
+		protocol := config.Protocol
+		if protocol == "" {
+			protocol = "HTTP"
+		}
+
+		// 验证协议
+		if protocol != "TCP" && protocol != "UDP" && protocol != "HTTP" {
+			result.Success = false
+			result.Error = "invalid protocol, must be TCP, UDP or HTTP"
+			results = append(results, result)
+			continue
+		}
+
+		// HTTP 模式需要 ingress_domain
+		if protocol == "HTTP" && config.IngressDomain == "" {
+			result.Success = false
+			result.Error = "ingress_domain is required for HTTP protocol"
+			results = append(results, result)
+			continue
+		}
+
+		// 调用业务逻辑
+		url, err := s.uc.SetInstancePort(ctx, req.InstanceId, config.Port, protocol, req.Open, config.IngressDomain)
+		if err != nil {
+			result.Success = false
+			result.Error = err.Error()
+			results = append(results, result)
+			continue
+		}
+
+		// 成功
+		result.Success = true
+		if req.Open {
+			result.AccessUrl = url
+		}
+		results = append(results, result)
+		successCount++
+	}
+
+	// 构建响应
+	allSuccess := successCount == len(req.PortConfigs)
+	message := "success"
+	if !allSuccess {
+		message = strconv.Itoa(successCount) + "/" + strconv.Itoa(len(req.PortConfigs)) + " ports processed successfully"
+	}
+
+	return &v1.SetInstancePortResp{
+		Success: allSuccess,
+		Results: results,
+		Message: message,
+	}, nil
+}
+
+// ExecContainer 容器 Exec 双向流处理
+func (s *ResourceService) ExecContainer(stream v1.ResourceService_ExecContainerServer) error {
+	ctx := stream.Context()
+
+	// 1. 接收初始化消息
+	req, err := stream.Recv()
+	if err != nil {
+		return errors.New(500, "STREAM_ERROR", "failed to receive init message: "+err.Error())
+	}
+
+	init := req.GetInit()
+	if init == nil {
+		return errors.New(400, "INVALID_ARGUMENT", "first message must be ExecInit")
+	}
+
+	// 2. 参数验证
+	if init.InstanceId == 0 {
+		return errors.New(400, "INVALID_ARGUMENT", "instance_id is required")
+	}
+	if len(init.Command) == 0 {
+		return errors.New(400, "INVALID_ARGUMENT", "command is required")
+	}
+
+	// 3. 查询实例信息获取 namespace (user_id)
+	resource, err := s.uc.GetResource(ctx, init.InstanceId)
+	if err != nil {
+		return errors.New(500, "INTERNAL_ERROR", "failed to query instance: "+err.Error())
+	}
+	if resource == nil {
+		return errors.New(404, "NOT_FOUND", "instance not found")
+	}
+
+	namespace := resource.UserID
+	if namespace == "" {
+		return errors.New(500, "INTERNAL_ERROR", "instance namespace is empty")
+	}
+
+	// 4. 创建输入输出通道
+	inputChan := make(chan biz.ExecInput, 10)
+	outputChan := make(chan biz.ExecOutput, 10)
+
+	// 5. 启动输入处理协程（gRPC → channel）
+	go func() {
+		defer close(inputChan)
+		for {
+			req, err := stream.Recv()
+			if err != nil {
+				// 客户端关闭连接或网络错误
+				return
+			}
+
+			switch msg := req.Message.(type) {
+			case *v1.ExecRequest_Input:
+				inputChan <- biz.ExecInput{
+					Type: biz.ExecInputStdin,
+					Data: msg.Input.Data,
+				}
+			case *v1.ExecRequest_Resize:
+				inputChan <- biz.ExecInput{
+					Type: biz.ExecInputResize,
+					Rows: msg.Resize.Rows,
+					Cols: msg.Resize.Cols,
+				}
+			}
+		}
+	}()
+
+	// 6. 启动输出处理协程（channel → gRPC）
+	errChan := make(chan error, 1)
+	go func() {
+		for out := range outputChan {
+			var resp *v1.ExecResponse
+
+			switch out.Type {
+			case biz.ExecOutputData:
+				streamType := v1.ExecOutput_STDOUT
+				if out.Stream == "stderr" {
+					streamType = v1.ExecOutput_STDERR
+				}
+				resp = &v1.ExecResponse{
+					Message: &v1.ExecResponse_Output{
+						Output: &v1.ExecOutput{
+							Stream: streamType,
+							Data:   out.Data,
+						},
+					},
+				}
+			case biz.ExecOutputError:
+				resp = &v1.ExecResponse{
+					Message: &v1.ExecResponse_Error{
+						Error: &v1.ExecError{Message: string(out.Data)},
+					},
+				}
+			case biz.ExecOutputExit:
+				resp = &v1.ExecResponse{
+					Message: &v1.ExecResponse_Exit{
+						Exit: &v1.ExecExit{Code: out.ExitCode},
+					},
+				}
+			}
+
+			if err := stream.Send(resp); err != nil {
+				errChan <- err
+				return
+			}
+		}
+		errChan <- nil
+	}()
+
+	// 7. 调用业务逻辑执行命令
+	containerName := ""
+	if init.ContainerName != nil {
+		containerName = *init.ContainerName
+	}
+
+	_ = s.uc.StreamExec(ctx, namespace, init.InstanceId, init.Command, init.Tty, containerName, inputChan, outputChan)
+	close(outputChan)
+
+	// 8. 等待输出协程完成
+	return <-errChan
+}

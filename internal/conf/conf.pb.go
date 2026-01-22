@@ -505,6 +505,8 @@ func (x *Data_RabbitMQ) GetRoutingKey() string {
 type Data_Kubernetes struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kubeconfig    string                 `protobuf:"bytes,1,opt,name=kubeconfig,proto3" json:"kubeconfig,omitempty"`
+	IngressDomain string                 `protobuf:"bytes,2,opt,name=ingress_domain,json=ingressDomain,proto3" json:"ingress_domain,omitempty"` // Ingress 默认域名（HTTP 模式）
+	NodeIp        string                 `protobuf:"bytes,3,opt,name=node_ip,json=nodeIp,proto3" json:"node_ip,omitempty"`                      // Node IP 地址（TCP/UDP 模式）
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -546,6 +548,20 @@ func (x *Data_Kubernetes) GetKubeconfig() string {
 	return ""
 }
 
+func (x *Data_Kubernetes) GetIngressDomain() string {
+	if x != nil {
+		return x.IngressDomain
+	}
+	return ""
+}
+
+func (x *Data_Kubernetes) GetNodeIp() string {
+	if x != nil {
+		return x.NodeIp
+	}
+	return ""
+}
+
 var File_conf_conf_proto protoreflect.FileDescriptor
 
 const file_conf_conf_proto_rawDesc = "" +
@@ -565,7 +581,7 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x04GRPC\x12\x18\n" +
 	"\anetwork\x18\x01 \x01(\tR\anetwork\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x123\n" +
-	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xf0\x04\n" +
+	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\xb0\x05\n" +
 	"\x04Data\x125\n" +
 	"\bdatabase\x18\x01 \x01(\v2\x19.kratos.api.Data.DatabaseR\bdatabase\x12,\n" +
 	"\x05redis\x18\x02 \x01(\v2\x16.kratos.api.Data.RedisR\x05redis\x125\n" +
@@ -586,12 +602,14 @@ const file_conf_conf_proto_rawDesc = "" +
 	"\x05queue\x18\x02 \x01(\tR\x05queue\x12\x1a\n" +
 	"\bexchange\x18\x03 \x01(\tR\bexchange\x12\x1f\n" +
 	"\vrouting_key\x18\x04 \x01(\tR\n" +
-	"routingKey\x1a,\n" +
+	"routingKey\x1al\n" +
 	"\n" +
 	"Kubernetes\x12\x1e\n" +
 	"\n" +
 	"kubeconfig\x18\x01 \x01(\tR\n" +
-	"kubeconfigB\x1dZ\x1bresource/internal/conf;confb\x06proto3"
+	"kubeconfig\x12%\n" +
+	"\x0eingress_domain\x18\x02 \x01(\tR\ringressDomain\x12\x17\n" +
+	"\anode_ip\x18\x03 \x01(\tR\x06nodeIpB\x1dZ\x1bresource/internal/conf;confb\x06proto3"
 
 var (
 	file_conf_conf_proto_rawDescOnce sync.Once

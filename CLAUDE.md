@@ -21,6 +21,12 @@ make build
 
 # 运行服务
 ./bin/resource -conf configs/config.yaml
+
+# 数据库迁移
+psql -U username -d database -f migrations/001_create_instance_network_table.sql
+
+# 回滚迁移
+psql -U username -d database -f migrations/001_create_instance_network_table_down.sql
 ```
 
 ---
@@ -265,6 +271,152 @@ GRPC localhost:9000/resource.v1.resourceService/GetResource
 
 ---
 
+## 业务功能示例
+
+### 实例网络端口暴露 (SetInstancePort)
+
+#### 功能说明
+将容器内的端口暴露到外部，支持 TCP/UDP（NodePort）和 HTTP（Ingress）两种模式。
+
+#### API 定义 (`api/resource/v1/resource.proto`)
+
+```protobuf
+rpc SetInstancePort(SetInstancePortReq) returns (SetInstancePortResp) {
+  option (google.api.http) = {
+    post: "/v1/SetInstancePort"
+    body: "*"
+  };
+}
+
+message SetInstancePortReq {
+  int64 instance_id = 1;        // 实例ID
+  bool open = 2;                // 是否打开端口
+  repeated uint32 ports = 3;    // 端口号列表
+  string protocol = 4;          // TCP/UDP/HTTP
+}
+
+message SetInstancePortResp {
+  bool success = 1;             // 是否成功
+  repeated string urls = 2;     // 访问URL列表
+}
+```
+
+#### Biz 层实现 (`internal/biz/resource.go`)
+
+```go
+// NetworkBinding 网络绑定信息
+type NetworkBinding struct {
+    InstanceID  int64
+    Port        uint32
+    ServiceName string
+    ServicePort uint32
+    NodePort    *uint32  // TCP/UDP 模式
+    IngressName *string  // HTTP 模式
+    Protocol    string
+    AccessURL   string
+    Enabled     bool
+}
+
+// NetworkRepo 网络配置仓储接口
+type NetworkRepo interface {
+    CreateNetworkBinding(ctx context.Context, binding NetworkBinding) error
+    UpdateNetworkBinding(ctx context.Context, binding NetworkBinding) error
+    DeleteNetworkBinding(ctx context.Context, instanceID int64, port uint32) error
+    GetNetworkBinding(ctx context.Context, instanceID int64, port uint32) (*NetworkBinding, error)
+    ListNetworkBindings(ctx context.Context, instanceID int64) ([]NetworkBinding, error)
+}
+
+// SetInstancePort 设置实例端口暴露
+func (uc *ResourceUsecase) SetInstancePort(ctx context.Context, instanceID int64, ports []uint32, protocol string, open bool) ([]string, error) {
+    // 1. 验证实例是否存在
+    // 2. 根据 protocol 选择暴露模式
+    // 3. 调用 K8sRepo 创建/删除 Service/Ingress
+    // 4. 调用 NetworkRepo 持久化配置
+    // 5. 返回访问 URL
+}
+```
+
+#### Data 层实现 (`internal/data/network.go`)
+
+```go
+// instanceNetwork 数据库模型
+type instanceNetwork struct {
+    InstanceID  int64     `gorm:"primaryKey;column:instance_id"`
+    Port        uint32    `gorm:"primaryKey;column:port"`
+    ServiceName string    `gorm:"column:service_name;size:64"`
+    ServicePort uint32    `gorm:"column:service_port"`
+    NodePort    *uint32   `gorm:"column:node_port"`
+    IngressName *string   `gorm:"column:ingress_name;size:64"`
+    Protocol    string    `gorm:"column:protocol"`
+    AccessURL   string    `gorm:"column:access_url"`
+    Enabled     bool      `gorm:"column:enabled"`
+}
+
+func (instanceNetwork) TableName() string { return "instance_network" }
+```
+
+#### K8s 操作 (`internal/data/k8sInstance.go`)
+
+```go
+// K8sRepo 接口扩展
+type K8sRepo interface {
+    CreateInstance(ctx context.Context, spec InstanceSpec) error
+    CreateService(ctx context.Context, instanceID int64, port uint32, protocol string) (string, *uint32, error)
+    DeleteService(ctx context.Context, serviceName string) error
+    CreateIngress(ctx context.Context, instanceID int64, port uint32, serviceName string) (string, string, error)
+    DeleteIngress(ctx context.Context, ingressName string) error
+}
+```
+
+#### 命名规范
+
+| 资源类型 | 命名格式 | 示例 |
+|---------|---------|------|
+| Service | `instance-{instance_id}-{port}` | `instance-123456-8080` |
+| Ingress | `ingress-{instance_id}-{port}` | `ingress-123456-8080` |
+
+#### 测试示例 (`tests/SetInstancePort.http`)
+
+```http
+### 打开 HTTP 端口
+POST http://localhost:8000/v1/SetInstancePort
+Content-Type: application/json
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "ports": [8080, 8081],
+  "protocol": "HTTP"
+}
+
+### 打开 TCP 端口
+POST http://localhost:8000/v1/SetInstancePort
+Content-Type: application/json
+
+{
+  "instance_id": 123456,
+  "open": true,
+  "ports": [3306],
+  "protocol": "TCP"
+}
+
+### 关闭端口
+POST http://localhost:8000/v1/SetInstancePort
+Content-Type: application/json
+
+{
+  "instance_id": 123456,
+  "open": false,
+  "ports": [8080]
+}
+```
+
+#### 数据库表结构
+
+详见 `migrations/README.md` 和 `migrations/001_create_instance_network_table.sql`
+
+---
+
 ## 常见问题 (FAQ)
 
 **Q: Proto 修改后不生效？**
@@ -285,6 +437,25 @@ make api
 make init
 ```
 
+**Q: 如何执行数据库迁移？**
+```bash
+# 应用迁移
+psql -U username -d database -f migrations/001_create_instance_network_table.sql
+
+# 回滚迁移
+psql -U username -d database -f migrations/001_create_instance_network_table_down.sql
+```
+
+**Q: NodePort 端口冲突？**
+- K8s NodePort 范围有限（30000-32767）
+- 检查 `instance_network` 表中已分配的 `node_port`
+- 考虑使用 HTTP 模式（Ingress）替代
+
+**Q: Ingress 域名如何配置？**
+- 在 `internal/conf/conf.proto` 中配置 Ingress 域名
+- 确保 DNS 解析正确指向 K8s 集群
+- 检查 Ingress Controller 是否正常运行
+
 ---
 
 ## 项目结构
@@ -301,6 +472,9 @@ make init
 │   ├── service/            # 服务实现 (应用层)
 │   ├── server/             # HTTP/gRPC Server
 │   └── conf/               # 配置结构体
+├── migrations/             # 数据库迁移脚本
+│   ├── *.sql               # SQL 迁移文件
+│   └── README.md           # 迁移文档
 ├── tests/                  # .http 测试文件
 └── third_party/            # 第三方 Proto
 ```

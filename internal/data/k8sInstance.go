@@ -190,8 +190,7 @@ func (r *k8sRepo) CreateInstance(ctx context.Context, spec biz.InstanceSpec) err
 							Name:  nameStr,
 							Image: spec.Image,
 							// 添加启动命令，保持容器运行
-							Command: []string{"/bin/sh"},
-							Args:    []string{"-c", "trap 'exit 0' TERM; sleep infinity & wait"},
+							Command: []string{"bash", "-lc", "sleep infinity"},
 							Resources: corev1.ResourceRequirements{
 								Requests: resourceList,
 								Limits:   resourceList,

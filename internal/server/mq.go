@@ -57,25 +57,29 @@ func (s *MQServer) Stop(ctx context.Context) error {
 	return nil
 }
 
-// 错误处理函数
-func (s *MQServer) handleError(err error, msg string) {
-	if err != nil {
-		s.log.Errorf("%s: %s", msg, err)
-		panic(fmt.Sprintf("rabbitMQ panic: %s: %s", msg, err))
-	}
-}
-
 func (s *MQServer) Start(ctx context.Context) error {
+	// 如果连接为 nil，说明 RabbitMQ 未配置或连接失败，跳过启动
+	if s.conn == nil {
+		s.log.Warn("RabbitMQ connection is nil, MQ server will not start")
+		// 阻塞等待 context 取消，但不消费消息
+		<-ctx.Done()
+		return nil
+	}
+
 	var err error
+
+	s.log.Infof("starting MQ server, queue=%s, exchange=%s, routingKey=%s", s.queue, s.exchange, s.routingKey)
 
 	// 1. 获取 Channel
 	s.ch, err = s.conn.Channel()
 	if err != nil {
+		s.log.Errorf("failed to open channel: %v", err)
 		return fmt.Errorf("failed to open channel: %v", err)
 	}
 
 	// 2. 声明 Exchange
 	if s.exchange != "" {
+		s.log.Infof("declaring exchange: %s (type=direct, durable=true)", s.exchange)
 		err = s.ch.ExchangeDeclare(
 			s.exchange, // name
 			"direct",   // type
@@ -86,11 +90,14 @@ func (s *MQServer) Start(ctx context.Context) error {
 			nil,        // arguments
 		)
 		if err != nil {
+			s.log.Errorf("exchange declare failed: %v", err)
 			return fmt.Errorf("exchange declare failed: %v", err)
 		}
+		s.log.Infof("exchange declared successfully: %s", s.exchange)
 	}
 
 	// 3. 声明 Queue
+	s.log.Infof("declaring queue: %s (durable=true)", s.queue)
 	q, err := s.ch.QueueDeclare(
 		s.queue, // name
 		true,    // durable: 队列持久化，防止重启丢失
@@ -100,12 +107,15 @@ func (s *MQServer) Start(ctx context.Context) error {
 		nil,     // arguments
 	)
 	if err != nil {
+		s.log.Errorf("queue declare failed: %v", err)
 		return fmt.Errorf("queue declare failed: %v", err)
 	}
 	s.queue = q.Name
+	s.log.Infof("queue declared successfully: %s", s.queue)
 
 	// 4. 绑定 Queue 到 Exchange
 	if s.exchange != "" && s.routingKey != "" {
+		s.log.Infof("binding queue %s to exchange %s with routing key %s", q.Name, s.exchange, s.routingKey)
 		err = s.ch.QueueBind(
 			q.Name,
 			s.routingKey,
@@ -114,8 +124,10 @@ func (s *MQServer) Start(ctx context.Context) error {
 			nil,
 		)
 		if err != nil {
+			s.log.Errorf("queue bind failed: %v", err)
 			return fmt.Errorf("queue bind failed: %v", err)
 		}
+		s.log.Infof("queue bound successfully")
 	}
 
 	// 5. QoS：单条串行处理，避免一次拉取过多消息

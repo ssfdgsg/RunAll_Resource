@@ -276,7 +276,9 @@ GRPC localhost:9000/resource.v1.resourceService/GetResource
 ### 实例网络端口暴露 (SetInstancePort)
 
 #### 功能说明
-将容器内的端口暴露到外部，支持 TCP/UDP（NodePort）和 HTTP（Ingress）两种模式。
+将容器内的端口暴露到外部，支持两种模式：
+1. **TCP/UDP 模式**: 通过 ClusterIP Service + ingress-nginx ConfigMap 暴露
+2. **HTTP 模式**: 通过 ClusterIP Service + Ingress 暴露
 
 #### API 定义 (`api/resource/v1/resource.proto`)
 
@@ -305,16 +307,19 @@ message SetInstancePortResp {
 
 ```go
 // NetworkBinding 网络绑定信息
+// 支持两种暴露模式：
+//  1. TCP/UDP: 通过 ClusterIP Service + ingress-nginx ConfigMap 暴露，ExternalPort 字段有值
+//  2. HTTP: 通过 ClusterIP Service + Ingress 暴露，IngressName 字段有值
 type NetworkBinding struct {
-    InstanceID  int64
-    Port        uint32
-    ServiceName string
-    ServicePort uint32
-    NodePort    *uint32  // TCP/UDP 模式
-    IngressName *string  // HTTP 模式
-    Protocol    string
-    AccessURL   string
-    Enabled     bool
+    InstanceID   int64
+    Port         uint32
+    ServiceName  string
+    ServicePort  uint32
+    ExternalPort *uint32  // TCP/UDP 模式的外部端口（ConfigMap key）
+    IngressName  *string  // HTTP 模式的 Ingress 名称
+    Protocol     string   // TCP/UDP/HTTP
+    AccessURL    string
+    Enabled      bool
 }
 
 // NetworkRepo 网络配置仓储接口
@@ -341,15 +346,15 @@ func (uc *ResourceUsecase) SetInstancePort(ctx context.Context, instanceID int64
 ```go
 // instanceNetwork 数据库模型
 type instanceNetwork struct {
-    InstanceID  int64     `gorm:"primaryKey;column:instance_id"`
-    Port        uint32    `gorm:"primaryKey;column:port"`
-    ServiceName string    `gorm:"column:service_name;size:64"`
-    ServicePort uint32    `gorm:"column:service_port"`
-    NodePort    *uint32   `gorm:"column:node_port"`
-    IngressName *string   `gorm:"column:ingress_name;size:64"`
-    Protocol    string    `gorm:"column:protocol"`
-    AccessURL   string    `gorm:"column:access_url"`
-    Enabled     bool      `gorm:"column:enabled"`
+    InstanceID   int64     `gorm:"primaryKey;column:instance_id"`
+    Port         uint32    `gorm:"primaryKey;column:port"`
+    ServiceName  string    `gorm:"column:service_name;size:64"`
+    ServicePort  uint32    `gorm:"column:service_port"`
+    ExternalPort *uint32   `gorm:"column:external_port"`  // TCP/UDP 模式的外部端口
+    IngressName  *string   `gorm:"column:ingress_name;size:64"`  // HTTP 模式的 Ingress 名称
+    Protocol     string    `gorm:"column:protocol"`
+    AccessURL    string    `gorm:"column:access_url"`
+    Enabled      bool      `gorm:"column:enabled"`
 }
 
 func (instanceNetwork) TableName() string { return "instance_network" }
@@ -361,10 +366,25 @@ func (instanceNetwork) TableName() string { return "instance_network" }
 // K8sRepo 接口扩展
 type K8sRepo interface {
     CreateInstance(ctx context.Context, spec InstanceSpec) error
-    CreateService(ctx context.Context, instanceID int64, port uint32, protocol string) (string, *uint32, error)
-    DeleteService(ctx context.Context, serviceName string) error
-    CreateIngress(ctx context.Context, instanceID int64, port uint32, serviceName string) (string, string, error)
-    DeleteIngress(ctx context.Context, ingressName string) error
+    
+    // CreateServiceForTCPUDP 创建 ClusterIP Service 并配置 ingress-nginx ConfigMap
+    // 返回: serviceName, externalPort, error
+    CreateServiceForTCPUDP(ctx context.Context, namespace, instanceID string, port uint32, protocol string) (string, uint32, error)
+    
+    // CreateServiceForHTTP 创建 ClusterIP Service
+    // 返回: serviceName, error
+    CreateServiceForHTTP(ctx context.Context, namespace, instanceID string, port uint32) (string, error)
+    
+    DeleteService(ctx context.Context, namespace, serviceName string) error
+    DeleteTCPUDPConfigMapEntry(ctx context.Context, protocol string, externalPort uint32) error
+    
+    // CreateIngress 创建 Ingress
+    // 返回: ingressName, accessURL, error
+    CreateIngress(ctx context.Context, namespace, instanceID string, port uint32, serviceName, ingressDomain string) (string, string, error)
+    
+    DeleteIngress(ctx context.Context, namespace, ingressName string) error
+    GetIngressDomain() string
+    GetIngressNginxLBIP(ctx context.Context) (string, error)
 }
 ```
 
@@ -374,6 +394,25 @@ type K8sRepo interface {
 |---------|---------|------|
 | Service | `instance-{instance_id}-{port}` | `instance-123456-8080` |
 | Ingress | `ingress-{instance_id}-{port}` | `ingress-123456-8080` |
+| ingress-nginx Service 端口名 | `tcp-{external_port}` 或 `udp-{external_port}` | `tcp-30000`, `udp-30001` |
+
+#### 实现方式对比
+
+| 模式 | Service 类型 | 暴露方式 | 访问地址格式 |
+|------|-------------|---------|-------------|
+| TCP/UDP | ClusterIP | ingress-nginx ConfigMap + Service 端口 | `<ingress-lb-ip>:<external-port>` |
+| HTTP | ClusterIP | Ingress | `http(s)://<domain>/<path>` |
+
+#### 关键发现
+
+**问题**: TCP/UDP 端口暴露后无法访问
+
+**原因**: ingress-nginx 通过 ConfigMap 配置 TCP/UDP 端口后，还必须在 Service 上暴露对应端口才能访问。
+
+**解决方案**: 
+- 自动 patch ingress-nginx Service 添加端口（`patchIngressNginxServicePort`）
+- 删除端口时自动清理（`removeIngressNginxServicePort`）
+- 端口名称必须小写（`tcp-30000` 而不是 `TCP-30000`）
 
 #### 测试示例 (`tests/SetInstancePort.http`)
 
@@ -440,21 +479,47 @@ make init
 **Q: 如何执行数据库迁移？**
 ```bash
 # 应用迁移
-psql -U username -d database -f migrations/001_create_instance_network_table.sql
-
-# 回滚迁移
-psql -U username -d database -f migrations/001_create_instance_network_table_down.sql
+psql -h localhost -p 5433 -U postgres -d resource -f migrations/001_create_instance_network_table.sql
 ```
 
-**Q: NodePort 端口冲突？**
-- K8s NodePort 范围有限（30000-32767）
-- 检查 `instance_network` 表中已分配的 `node_port`
-- 考虑使用 HTTP 模式（Ingress）替代
+**Q: TCP/UDP 端口无法访问？**
+- 检查 ingress-nginx ConfigMap 是否有对应条目：`kubectl -n ingress-nginx get cm tcp-services -o yaml`
+- 检查 ingress-nginx Service 是否暴露了对应端口：`kubectl -n ingress-nginx get svc ingress-nginx-controller`
+- 检查 LoadBalancer IP 是否正确：`kubectl -n ingress-nginx get svc ingress-nginx-controller -o wide`
+- 检查云服务器安全组是否开放端口（30000-32767）
 
-**Q: Ingress 域名如何配置？**
-- 在 `internal/conf/conf.proto` 中配置 Ingress 域名
-- 确保 DNS 解析正确指向 K8s 集群
-- 检查 Ingress Controller 是否正常运行
+**Q: 如何配置 K3s 集群连接？**
+1. 从 K3s 服务器获取 kubeconfig：`sudo cat /etc/rancher/k3s/k3s.yaml`
+2. 创建 `k3s-config.yaml`，修改 server 地址为公网 IP
+3. 添加 `insecure-skip-tls-verify: true`（如果证书不包含公网 IP）
+4. 在 `configs/config.yaml` 中配置 `kubeconfig: k3s-config.yaml`
+
+**Q: 如何部署 ingress-nginx？**
+
+**K3s 集群**:
+```bash
+# 安装 ingress-nginx
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/cloud/deploy.yaml
+
+# 配置 externalIPs（如果没有 LoadBalancer）
+kubectl -n ingress-nginx patch svc ingress-nginx-controller \
+  -p '{"spec":{"externalIPs":["47.110.74.199"]}}'
+
+# 确保安全组开放端口：6443, 80, 443, 30000-32767
+```
+
+**Minikube 环境**:
+```bash
+# 启用 ingress 插件
+minikube addons enable ingress
+
+# 改为 LoadBalancer 类型
+kubectl -n ingress-nginx patch svc ingress-nginx-controller \
+  -p '{"spec":{"type":"LoadBalancer"}}'
+
+# 运行 tunnel（模拟 LoadBalancer）
+minikube tunnel
+```
 
 ---
 

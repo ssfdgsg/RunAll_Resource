@@ -14,14 +14,15 @@ data:
     read_timeout: 0.2s
     write_timeout: 0.2s
   rabbitmq:
-    url: amqp://guest:guest@localhost:5672/
+    url: amqps://bmiwljsz:m-g0r6Kom7PczBInty5gha8ywPKXJBcz@fuji.lmq.cloudamqp.com/bmiwljsz
     queue: resource.instance.created
     exchange: resource.events
     routing_key: instance.created
+    timeout: 5s
   kubernetes:
-    kubeconfig: C:/Users/hp/.kube/config
+    kubeconfig: k3s-config.yaml  # 使用 K3s 的 kubeconfig
     # Ingress 域名（HTTP 模式）
-    ingress_domain: "demo.localtest.me"
+    ingress_domain: "47.110.74.199.nip.io"  # 使用 nip.io 魔法域名
     # ingress-nginx 配置（TCP/UDP 模式）
     ingress_nginx_namespace: "ingress-nginx"
     ingress_nginx_lb_service: "ingress-nginx-controller"

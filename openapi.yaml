@@ -6,6 +6,49 @@ info:
     title: ResourceService API
     version: 0.0.1
 paths:
+    /v1/instances/{instanceId}:
+        put:
+            tags:
+                - ResourceService
+            description: 7. 更新实例规格
+            operationId: ResourceService_UpdateInstance
+            parameters:
+                - name: instanceId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/resource.v1.UpdateInstanceReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resource.v1.UpdateInstanceReply'
+        delete:
+            tags:
+                - ResourceService
+            description: 4. 删除实例
+            operationId: ResourceService_DeleteInstance
+            parameters:
+                - name: instanceId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resource.v1.DeleteInstanceReply'
     /v1/instances/{instanceId}/ports:
         post:
             tags:
@@ -31,6 +74,56 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/resource.v1.SetInstancePortResp'
+    /v1/instances/{instanceId}/start:
+        post:
+            tags:
+                - ResourceService
+            description: 6. 启动实例
+            operationId: ResourceService_StartInstance
+            parameters:
+                - name: instanceId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/resource.v1.StartInstanceReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resource.v1.StartInstanceReply'
+    /v1/instances/{instanceId}/stop:
+        post:
+            tags:
+                - ResourceService
+            description: 5. 停止实例
+            operationId: ResourceService_StopInstance
+            parameters:
+                - name: instanceId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/resource.v1.StopInstanceReq'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/resource.v1.StopInstanceReply'
     /v1/resources:
         get:
             tags:
@@ -70,6 +163,11 @@ paths:
                                 $ref: '#/components/schemas/resource.v1.ListResourcesReply'
 components:
     schemas:
+        resource.v1.DeleteInstanceReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
         resource.v1.ListResourcesReply:
             type: object
             properties:
@@ -162,5 +260,49 @@ components:
                         $ref: '#/components/schemas/resource.v1.PortResult'
                 message:
                     type: string
+        resource.v1.StartInstanceReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+        resource.v1.StartInstanceReq:
+            type: object
+            properties:
+                instanceId:
+                    type: string
+            description: 6. 启动实例
+        resource.v1.StopInstanceReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+        resource.v1.StopInstanceReq:
+            type: object
+            properties:
+                instanceId:
+                    type: string
+            description: 5. 停止实例
+        resource.v1.UpdateInstanceReply:
+            type: object
+            properties:
+                success:
+                    type: boolean
+        resource.v1.UpdateInstanceReq:
+            type: object
+            properties:
+                instanceId:
+                    type: string
+                cpu:
+                    type: integer
+                    format: uint32
+                memory:
+                    type: integer
+                    format: uint32
+                gpu:
+                    type: integer
+                    format: uint32
+                image:
+                    type: string
+            description: 7. 更新实例规格
 tags:
     - name: ResourceService

@@ -215,6 +215,115 @@ func (r *k8sRepo) CreateInstance(ctx context.Context, spec biz.InstanceSpec) err
 	return nil
 }
 
+// DeleteInstance deletes an instance deployment and its associated resources.
+func (r *k8sRepo) DeleteInstance(ctx context.Context, namespace, instanceID string) error {
+	r.log.WithContext(ctx).Infof("deleting instance %s in namespace %s", instanceID, namespace)
+
+	// Delete Deployment
+	err := r.client.AppsV1().Deployments(namespace).Delete(ctx, instanceID, metav1.DeleteOptions{})
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete deployment: %w", err)
+	}
+
+	// Delete Services and Ingresses with matching instance-id label
+	labelSelector := fmt.Sprintf("instance-id=%s", instanceID)
+
+	services, err := r.client.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+	if err == nil {
+		for _, svc := range services.Items {
+			_ = r.client.CoreV1().Services(namespace).Delete(ctx, svc.Name, metav1.DeleteOptions{})
+		}
+	}
+
+	_ = r.client.NetworkingV1().Ingresses(namespace).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{LabelSelector: labelSelector})
+
+	r.log.WithContext(ctx).Infof("instance %s deleted successfully", instanceID)
+	return nil
+}
+
+func (r *k8sRepo) scaleDeployment(ctx context.Context, namespace, instanceID string, replicas int32) error {
+	scale, err := r.client.AppsV1().Deployments(namespace).GetScale(ctx, instanceID, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get scale for deployment %s: %w", instanceID, err)
+	}
+
+	scale.Spec.Replicas = replicas
+	_, err = r.client.AppsV1().Deployments(namespace).UpdateScale(ctx, instanceID, scale, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update scale for deployment %s: %w", instanceID, err)
+	}
+	return nil
+}
+
+// StopInstance scales the deployment replicas to 0
+func (r *k8sRepo) StopInstance(ctx context.Context, namespace, instanceID string) error {
+	r.log.WithContext(ctx).Infof("stopping instance %s in namespace %s", instanceID, namespace)
+	return r.scaleDeployment(ctx, namespace, instanceID, 0)
+}
+
+// StartInstance scales the deployment replicas to 1
+func (r *k8sRepo) StartInstance(ctx context.Context, namespace, instanceID string) error {
+	r.log.WithContext(ctx).Infof("starting instance %s in namespace %s", instanceID, namespace)
+	return r.scaleDeployment(ctx, namespace, instanceID, 1)
+}
+
+// UpdateInstance dynamically updates the instance's resource quotas and container image
+func (r *k8sRepo) UpdateInstance(ctx context.Context, spec biz.InstanceSpec) error {
+	instanceIDStr := strconv.Itoa(int(spec.InstanceID))
+	r.log.WithContext(ctx).Infof("updating instance %s in namespace %s", instanceIDStr, spec.UserID)
+
+	deployment, err := r.client.AppsV1().Deployments(spec.UserID).Get(ctx, instanceIDStr, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get deployment %s: %w", instanceIDStr, err)
+	}
+
+	if len(deployment.Spec.Template.Spec.Containers) > 0 {
+		// Update Image
+		if spec.Image != "" {
+			deployment.Spec.Template.Spec.Containers[0].Image = spec.Image
+		}
+
+		// Update Resources
+		resourceList := corev1.ResourceList{}
+		cpuMilli := int64(spec.CPU) * 1000
+		memBytes := int64(spec.Memory) * 1024 * 1024
+		if cpuMilli <= 0 {
+			cpuMilli = 1000 // default fallback
+		}
+		if memBytes <= 0 {
+			memBytes = 512 * 1024 * 1024 // default fallback
+		}
+
+		resourceList[corev1.ResourceCPU] = *resource.NewMilliQuantity(cpuMilli, resource.DecimalSI)
+		resourceList[corev1.ResourceMemory] = *resource.NewQuantity(memBytes, resource.BinarySI)
+
+		var nodeSelector map[string]string
+		if spec.GPU > 0 {
+			if g, ok := gpuTypeMap[spec.GPU]; ok {
+				gpuCount := int64(g.nums)
+				resourceList[corev1.ResourceName("nvidia.com/gpu")] = *resource.NewQuantity(gpuCount, resource.DecimalSI)
+				if g.name != "" {
+					nodeSelector = map[string]string{"accelerator": g.name}
+				}
+			}
+		}
+
+		deployment.Spec.Template.Spec.Containers[0].Resources = corev1.ResourceRequirements{
+			Requests: resourceList,
+			Limits:   resourceList,
+		}
+		deployment.Spec.Template.Spec.NodeSelector = nodeSelector
+	}
+
+	_, err = r.client.AppsV1().Deployments(spec.UserID).Update(ctx, deployment, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update deployment %s: %w", instanceIDStr, err)
+	}
+
+	r.log.WithContext(ctx).Infof("instance %s updated successfully", instanceIDStr)
+	return nil
+}
+
 // CreateServiceForTCPUDP creates a ClusterIP Service for TCP/UDP protocols and patches ingress-nginx ConfigMap.
 // Returns the service name and the allocated external port.
 func (r *k8sRepo) CreateServiceForTCPUDP(ctx context.Context, namespace, instanceID string, port uint32, protocol string) (string, uint32, error) {

@@ -1,0 +1,64 @@
+### DeleteInstance - 删除实例 (HTTP)
+DELETE http://localhost:8000/v1/instances/123456
+
+### DeleteInstance - 删除实例 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/DeleteInstance
+
+{
+  "instance_id": 123456
+}
+
+### StopInstance - 停止实例 (HTTP)
+POST http://localhost:8000/v1/instances/123456/stop
+Content-Type: application/json
+
+{
+  "instance_id": 123456
+}
+
+### StopInstance - 停止实例 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/StopInstance
+
+{
+  "instance_id": 123456
+}
+
+
+### StartInstance - 启动实例 (HTTP)
+POST http://localhost:8000/v1/instances/123456/start
+Content-Type: application/json
+
+{
+  "instance_id": 123456
+}
+
+### StartInstance - 启动实例 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/StartInstance
+
+{
+  "instance_id": 123456
+}
+
+
+### UpdateInstance - 更新实例规格 (HTTP)
+PUT http://localhost:8000/v1/instances/123456
+Content-Type: application/json
+
+{
+  "instance_id": 123456,
+  "cpu": 2,
+  "memory": 2048,
+  "gpu": 0,
+  "image": "nginx:latest"
+}
+
+### UpdateInstance - 更新实例规格 (gRPC)
+GRPC localhost:9000/resource.v1.resourceService/UpdateInstance
+
+{
+  "instance_id": 123456,
+  "cpu": 2,
+  "memory": 2048,
+  "gpu": 0,
+  "image": "nginx:latest"
+}

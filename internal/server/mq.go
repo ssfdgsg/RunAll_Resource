@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"resource/internal/conf"
 	"resource/internal/service"
+	"strings"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/transport"
@@ -18,28 +20,49 @@ type MQServer struct {
 	conn *amqp.Connection
 	ch   *amqp.Channel
 
-	log        *log.Helper
-	resource   *service.ResourceService
-	queue      string
-	exchange   string
-	routingKey string
+	log         *log.Helper
+	resource    *service.ResourceService
+	queue       string
+	exchange    string
+	routingKey  string
+	dlxExchange string
+	dlxQueue    string
+	maxRetries  uint32
 
 	consumerTag string
 	consumeFunc func(context.Context, []byte) error
 }
 
 // NewMQServer new a MQ server.
-
 func NewMQServer(c *conf.Data, conn *amqp.Connection, resource *service.ResourceService, logger log.Logger) *MQServer {
 	r := c.GetRabbitmq()
 
+	// 设置默认值
+	maxRetries := r.GetMaxRetries()
+	if maxRetries == 0 {
+		maxRetries = 3 // 默认重试 3 次
+	}
+
+	dlxExchange := r.GetDlxExchange()
+	if dlxExchange == "" {
+		dlxExchange = "resource.dlx"
+	}
+
+	dlxQueue := r.GetDlxQueue()
+	if dlxQueue == "" {
+		dlxQueue = "resource.dlq"
+	}
+
 	return &MQServer{
-		conn:       conn,
-		queue:      r.GetQueue(),
-		exchange:   r.GetExchange(),
-		routingKey: r.GetRoutingKey(),
-		resource:   resource,
-		log:        log.NewHelper(logger),
+		conn:        conn,
+		queue:       r.GetQueue(),
+		exchange:    r.GetExchange(),
+		routingKey:  r.GetRoutingKey(),
+		dlxExchange: dlxExchange,
+		dlxQueue:    dlxQueue,
+		maxRetries:  maxRetries,
+		resource:    resource,
+		log:         log.NewHelper(logger),
 	}
 }
 
@@ -68,7 +91,7 @@ func (s *MQServer) Start(ctx context.Context) error {
 
 	var err error
 
-	s.log.Infof("starting MQ server, queue=%s, exchange=%s, routingKey=%s", s.queue, s.exchange, s.routingKey)
+	s.log.Infof("starting MQ server, queue=%s, exchange=%s, routingKey=%s, maxRetries=%d", s.queue, s.exchange, s.routingKey, s.maxRetries)
 
 	// 1. 获取 Channel
 	s.ch, err = s.conn.Channel()
@@ -77,7 +100,52 @@ func (s *MQServer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to open channel: %v", err)
 	}
 
-	// 2. 声明 Exchange
+	// 2. 声明死信交换机
+	s.log.Infof("declaring DLX exchange: %s", s.dlxExchange)
+	err = s.ch.ExchangeDeclare(
+		s.dlxExchange, // name
+		"direct",      // type
+		true,          // durable
+		false,         // auto-deleted
+		false,         // internal
+		false,         // no-wait
+		nil,
+	)
+	if err != nil {
+		s.log.Errorf("DLX exchange declare failed: %v", err)
+		return fmt.Errorf("DLX exchange declare failed: %v", err)
+	}
+
+	// 3. 声明死信队列
+	s.log.Infof("declaring DLQ queue: %s", s.dlxQueue)
+	dlq, err := s.ch.QueueDeclare(
+		s.dlxQueue, // name
+		true,       // durable
+		false,      // delete when unused
+		false,      // exclusive
+		false,      // no-wait
+		nil,
+	)
+	if err != nil {
+		s.log.Errorf("DLQ queue declare failed: %v", err)
+		return fmt.Errorf("DLQ queue declare failed: %v", err)
+	}
+
+	// 4. 绑定死信队列到死信交换机
+	err = s.ch.QueueBind(
+		dlq.Name,
+		s.dlxQueue,    // routing key
+		s.dlxExchange, // exchange
+		false,
+		nil,
+	)
+	if err != nil {
+		s.log.Errorf("DLQ queue bind failed: %v", err)
+		return fmt.Errorf("DLQ queue bind failed: %v", err)
+	}
+	s.log.Infof("DLQ configured successfully")
+
+	// 5. 声明主 Exchange
 	if s.exchange != "" {
 		s.log.Infof("declaring exchange: %s (type=direct, durable=true)", s.exchange)
 		err = s.ch.ExchangeDeclare(
@@ -96,15 +164,18 @@ func (s *MQServer) Start(ctx context.Context) error {
 		s.log.Infof("exchange declared successfully: %s", s.exchange)
 	}
 
-	// 3. 声明 Queue
-	s.log.Infof("declaring queue: %s (durable=true)", s.queue)
+	// 6. 声明主 Queue（配置死信队列）
+	s.log.Infof("declaring queue: %s (durable=true, with DLX)", s.queue)
 	q, err := s.ch.QueueDeclare(
 		s.queue, // name
 		true,    // durable: 队列持久化，防止重启丢失
 		false,   // delete when unused
 		false,   // exclusive
 		false,   // no-wait
-		nil,     // arguments
+		amqp.Table{
+			"x-dead-letter-exchange":    s.dlxExchange, // 死信交换机
+			"x-dead-letter-routing-key": s.dlxQueue,    // 死信路由键
+		},
 	)
 	if err != nil {
 		s.log.Errorf("queue declare failed: %v", err)
@@ -113,7 +184,7 @@ func (s *MQServer) Start(ctx context.Context) error {
 	s.queue = q.Name
 	s.log.Infof("queue declared successfully: %s", s.queue)
 
-	// 4. 绑定 Queue 到 Exchange
+	// 7. 绑定 Queue 到 Exchange
 	if s.exchange != "" && s.routingKey != "" {
 		s.log.Infof("binding queue %s to exchange %s with routing key %s", q.Name, s.exchange, s.routingKey)
 		err = s.ch.QueueBind(
@@ -178,13 +249,34 @@ func (s *MQServer) Start(ctx context.Context) error {
 
 // processMessage 处理单条消息
 func (s *MQServer) processMessage(ctx context.Context, d amqp.Delivery) {
-	fmt.Printf("the output is %d,%t,%d ", d.DeliveryTag, d.Redelivered, len(d.Body))
+	// 获取重试次数
+	retryCount := getRetryCount(d.Headers)
+
+	s.log.Infof("processing message: deliveryTag=%d, redelivered=%t, retryCount=%d/%d, bodySize=%d",
+		d.DeliveryTag, d.Redelivered, retryCount, s.maxRetries, len(d.Body))
+
+	// 检查是否超过最大重试次数
+	if retryCount >= int(s.maxRetries) {
+		s.log.Errorf("message exceeded max retries (%d), sending to DLQ", s.maxRetries)
+		// 超过重试次数，拒绝并发送到死信队列
+		if err := d.Reject(false); err != nil {
+			s.log.Errorf("failed to reject message: %v", err)
+		}
+		return
+	}
+
 	s.processMessageBody(
 		ctx,
 		d.Body,
 		func() error { return d.Ack(false) },
-		func() error { return d.Reject(true) },
-		func() error { return d.Reject(false) },
+		func() error {
+			s.log.Warnf("requeuing message (retry %d/%d)", retryCount+1, s.maxRetries)
+			return d.Reject(true) // 重新入队
+		},
+		func() error {
+			s.log.Errorf("dropping message (non-retryable error)")
+			return d.Reject(false) // 发送到死信队列
+		},
 	)
 }
 
@@ -208,16 +300,85 @@ func (s *MQServer) processMessageBody(
 	if consume == nil {
 		consume = s.resource.ConsumeMqMessage
 	}
-	if err := consume(ctx, body); err != nil {
-		s.log.Errorf("Failed to process message: %v", err)
-		if err := rejectRequeue(); err != nil {
-			s.log.Errorf("Failed to reject message (requeue): %v", err)
+
+	err := consume(ctx, body)
+	if err == nil {
+		if err := ack(); err != nil {
+			s.log.Errorf("Failed to ACK message: %v", err)
+		} else {
+			s.log.Info("Message handled and ACKed")
 		}
 		return
 	}
-	if err := ack(); err != nil {
-		s.log.Errorf("Failed to ACK message: %v", err)
-		return
+
+	// 根据错误类型决定是否重试
+	if isRetryableError(err) {
+		s.log.Warnf("Retryable error: %v, requeuing", err)
+		if err := rejectRequeue(); err != nil {
+			s.log.Errorf("Failed to requeue message: %v", err)
+		}
+	} else {
+		s.log.Errorf("Non-retryable error: %v, sending to DLQ", err)
+		if err := rejectDrop(); err != nil {
+			s.log.Errorf("Failed to drop message: %v", err)
+		}
 	}
-	s.log.Info("Message handled and ACKed")
+}
+
+// getRetryCount 获取消息的重试次数
+func getRetryCount(headers amqp.Table) int {
+	if headers == nil {
+		return 0
+	}
+
+	// RabbitMQ 在消息被 reject(requeue=true) 后会增加 x-death header
+	if xDeath, ok := headers["x-death"].([]interface{}); ok && len(xDeath) > 0 {
+		if death, ok := xDeath[0].(amqp.Table); ok {
+			if count, ok := death["count"].(int64); ok {
+				return int(count)
+			}
+		}
+	}
+
+	return 0
+}
+
+// isRetryableError 判断错误是否可重试
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errMsg := err.Error()
+
+	// 网络错误、超时错误 → 可重试
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) {
+		return true
+	}
+
+	// K8s API 临时错误 → 可重试
+	if strings.Contains(errMsg, "connection refused") ||
+		strings.Contains(errMsg, "connection reset") ||
+		strings.Contains(errMsg, "timeout") ||
+		strings.Contains(errMsg, "temporary failure") {
+		return true
+	}
+
+	// 数据库约束冲突、参数错误 → 不可重试
+	if strings.Contains(errMsg, "duplicate key") ||
+		strings.Contains(errMsg, "INVALID_ARGUMENT") ||
+		strings.Contains(errMsg, "NOT_FOUND") ||
+		strings.Contains(errMsg, "ALREADY_EXISTS") ||
+		strings.Contains(errMsg, "constraint") {
+		return false
+	}
+
+	// K8s 资源已存在 → 不可重试
+	if strings.Contains(errMsg, "AlreadyExists") {
+		return false
+	}
+
+	// 默认可重试（保守策略）
+	return true
 }

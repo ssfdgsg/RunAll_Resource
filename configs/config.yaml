@@ -18,7 +18,10 @@ data:
     queue: resource.instance.created
     exchange: resource.events
     routing_key: instance.created
-    timeout: 5s
+    dlx_exchange: resource.dlx          # 死信交换机
+    dlx_queue: resource.dlq             # 死信队列
+    max_retries: 3                      # 最大重试次数
+    message_ttl: 300000                 # 消息 TTL: 5分钟 (毫秒)
   kubernetes:
     kubeconfig: k3s-config.yaml  # 使用 K3s 的 kubeconfig
     # Ingress 域名（HTTP 模式）

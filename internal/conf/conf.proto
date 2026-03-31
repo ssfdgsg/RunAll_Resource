@@ -41,6 +41,10 @@ message Data {
     string queue = 2;
     string exchange = 3;
     string routing_key = 4;
+    string dlx_exchange = 5;      // 死信交换机
+    string dlx_queue = 6;         // 死信队列
+    uint32 max_retries = 7;       // 最大重试次数
+    uint32 message_ttl = 8;       // 消息 TTL (毫秒)
   }
   message Kubernetes {
     string kubeconfig = 1;

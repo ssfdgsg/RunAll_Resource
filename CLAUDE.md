@@ -454,6 +454,42 @@ Content-Type: application/json
 
 详见 `migrations/README.md` 和 `migrations/001_create_instance_network_table.sql`
 
+### 实例生命周期管理 (Lifecycle Management)
+
+#### 功能说明
+控制实例容器的生命周期状态，包括：
+1. **删除 (Delete)**: 销毁 Deployment 及关联的 Service/Ingress 网络资源
+2. **停止 (Stop)**: 将 Deployment 的 Replicas 缩容至 0，从而终止 Pod
+3. **启动 (Start)**: 将 Deployment 的 Replicas 扩容至 1，恢复容器运行
+4. **更新 (Update)**: 动态热更 Deployment 的资源限额 (CPU/Mem/GPU) 和镜像
+
+#### API 定义 (`api/resource/v1/resource.proto`)
+
+```protobuf
+  rpc DeleteInstance (DeleteInstanceReq) returns (DeleteInstanceReply) {
+    option (google.api.http) = { delete: "/v1/instances/{instance_id}" };
+  }
+  rpc StopInstance (StopInstanceReq) returns (StopInstanceReply) {
+    option (google.api.http) = { post: "/v1/instances/{instance_id}/stop", body: "*" };
+  }
+  rpc StartInstance (StartInstanceReq) returns (StartInstanceReply) {
+    option (google.api.http) = { post: "/v1/instances/{instance_id}/start", body: "*" };
+  }
+  rpc UpdateInstance (UpdateInstanceReq) returns (UpdateInstanceReply) {
+    option (google.api.http) = { put: "/v1/instances/{instance_id}", body: "*" };
+  }
+```
+
+#### Biz 层与 Data 层联动
+对于所有这四个操作，`ResourceUsecase` 都起到了以下编排作用：
+1. `uc.InstanceSpec.GetResource()` 校验实例存在性，并提取当前实例的租户 `UserID` 作为 `namespace` 下发。
+2. 调用底层 `uc.K8sRepo` 执行声明周期命令：
+   - Delete：调用 `Deployments(...).Delete(...)` 和 `Services(...).DeleteCollection(...)`。
+   - Stop/Start：通过 `UpdateScale()` 分别设置为 `0`/`1`。
+   - Update：通过 `Deployments(...).Update(...)` 全量替换 `ResourceRequirements` 和容忍/节点选择器。
+3. 如果是 Delete，还会级联调用 `uc.NetworkRepo.BatchDeleteNetworkBindings` 清理数据库遗留的端口。
+4. 调用 `uc.AuditRepo.CreateAudit()` 记录此操作的合规审计日志。
+
 ---
 
 ## 常见问题 (FAQ)
@@ -559,3 +595,34 @@ minikube tunnel
 - 修改任一文件中的规范/流程/约束时，必须同时更新另一个文件
 - 共同部分（分层架构、代码风格）必须保持一致
 - 提交前检查两个文件的同步状态
+
+---
+
+## K8s 待办事项与优先级 (Pending Tasks)
+
+以下是当前基于 Kubernetes 相关的集成待办事项，按优先级排序（P0到P2）：
+
+### 🔴 高优先级 (P0) - 核心功能与稳定性缺失
+1. **~~实例生命周期管理（Lifecycle Management）补全~~ (已完成)**
+   - 添加 DeleteInstance, StopInstance/StartInstance, UpdateInstance 接口。
+2. **持久化存储卷 (Persistent Volumes) 支持**
+   - 为实例提供 PVC 挂载，防止重启后数据丢失。
+3. **高可用网络端口池管理（TCP/UDP）**
+   - 实现基于数据库和分布式锁的端口池分配与回收，解决重启计数器归零覆盖冲突问题。
+
+### 🟡 中优先级 (P1) - 隔离、限额与可观测性
+4. **K8s 日志观测 (Pod Logs Access)**
+   - 添加流式拉取 Pod stdout/stderr 日志的能力。
+5. **多租户资源配额保障 (Resource Quota / LimitRange)**
+   - 在创建用户 Namespace 时下发总资源限额。
+6. **健康检查与探针 (Probes)**
+   - 为实例容器下发 Readiness/Liveness 探针。
+
+### 🟢 低优先级 (P2) - 安全加固与高级功能
+7. **Pod 安全上下文 (SecurityContext) 及权限限制**
+   - 限制容器内 Root 提权 (`RunAsNonRoot`, `AllowPrivilegeEscalation: false`)。
+8. **网络隔离策略 (NetworkPolicy)**
+   - 跨租户网络拦截，仅放行外部入口网关流量。
+9. **指标监控 (Metrics collection)**
+   - 集成 Metrics Server 获取真实 CPU/Mem 占用。
+

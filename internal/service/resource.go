@@ -407,3 +407,67 @@ func (s *ResourceService) ExecContainer(stream v1.ResourceService_ExecContainerS
 	// 8. 等待输出协程完成
 	return <-errChan
 }
+
+// DeleteInstance deletes an instance deployment and its associated resources.
+func (s *ResourceService) DeleteInstance(ctx context.Context, req *v1.DeleteInstanceReq) (*v1.DeleteInstanceReply, error) {
+	if req == nil {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "request is required")
+	}
+	if req.InstanceId == 0 {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "instance_id is required")
+	}
+
+	err := s.uc.DeleteInstance(ctx, req.InstanceId)
+	if err != nil {
+		return &v1.DeleteInstanceReply{Success: false}, err
+	}
+	return &v1.DeleteInstanceReply{Success: true}, nil
+}
+
+// StopInstance scales the deployment replicas to 0.
+func (s *ResourceService) StopInstance(ctx context.Context, req *v1.StopInstanceReq) (*v1.StopInstanceReply, error) {
+	if req == nil {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "request is required")
+	}
+	if req.InstanceId == 0 {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "instance_id is required")
+	}
+
+	err := s.uc.StopInstance(ctx, req.InstanceId)
+	if err != nil {
+		return &v1.StopInstanceReply{Success: false}, err
+	}
+	return &v1.StopInstanceReply{Success: true}, nil
+}
+
+// StartInstance scales the deployment replicas to 1.
+func (s *ResourceService) StartInstance(ctx context.Context, req *v1.StartInstanceReq) (*v1.StartInstanceReply, error) {
+	if req == nil {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "request is required")
+	}
+	if req.InstanceId == 0 {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "instance_id is required")
+	}
+
+	err := s.uc.StartInstance(ctx, req.InstanceId)
+	if err != nil {
+		return &v1.StartInstanceReply{Success: false}, err
+	}
+	return &v1.StartInstanceReply{Success: true}, nil
+}
+
+// UpdateInstance dynamically updates the instance's resource quotas and container image.
+func (s *ResourceService) UpdateInstance(ctx context.Context, req *v1.UpdateInstanceReq) (*v1.UpdateInstanceReply, error) {
+	if req == nil {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "request is required")
+	}
+	if req.InstanceId == 0 {
+		return nil, errors.New(400, "INVALID_ARGUMENT", "instance_id is required")
+	}
+
+	err := s.uc.UpdateInstance(ctx, req.InstanceId, req.Cpu, req.Memory, req.Gpu, req.Image)
+	if err != nil {
+		return &v1.UpdateInstanceReply{Success: false}, err
+	}
+	return &v1.UpdateInstanceReply{Success: true}, nil
+}

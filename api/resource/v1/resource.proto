@@ -30,6 +30,37 @@ service resourceService {
 
   //3. 容器 Exec 双向流
   rpc ExecContainer(stream ExecRequest) returns (stream ExecResponse);
+
+  //4. 删除实例
+  rpc DeleteInstance (DeleteInstanceReq) returns (DeleteInstanceReply) {
+    option (google.api.http) = {
+      delete: "/v1/instances/{instance_id}"
+    };
+  }
+
+  //5. 停止实例
+  rpc StopInstance (StopInstanceReq) returns (StopInstanceReply) {
+    option (google.api.http) = {
+      post: "/v1/instances/{instance_id}/stop"
+      body: "*"
+    };
+  }
+
+  //6. 启动实例
+  rpc StartInstance (StartInstanceReq) returns (StartInstanceReply) {
+    option (google.api.http) = {
+      post: "/v1/instances/{instance_id}/start"
+      body: "*"
+    };
+  }
+
+  //7. 更新实例规格
+  rpc UpdateInstance (UpdateInstanceReq) returns (UpdateInstanceReply) {
+    option (google.api.http) = {
+      put: "/v1/instances/{instance_id}"
+      body: "*"
+    };
+  }
 }
 
 //=====================实体/值对象=======================
@@ -147,4 +178,44 @@ message ExecError {
 //退出消息
 message ExecExit {
   int32 code = 1;  //退出码
+}
+
+//4. 删除实例
+message DeleteInstanceReq {
+  int64 instance_id = 1;
+}
+
+message DeleteInstanceReply {
+  bool success = 1;
+}
+
+//5. 停止实例
+message StopInstanceReq {
+  int64 instance_id = 1;
+}
+
+message StopInstanceReply {
+  bool success = 1;
+}
+
+//6. 启动实例
+message StartInstanceReq {
+  int64 instance_id = 1;
+}
+
+message StartInstanceReply {
+  bool success = 1;
+}
+
+//7. 更新实例规格
+message UpdateInstanceReq {
+  int64 instance_id = 1;
+  uint32 cpu = 2;          // CPU核数
+  uint32 memory = 3;       // 内存大小(MB)
+  uint32 gpu = 4;          // GPU种类
+  string image = 5;        // 镜像
+}
+
+message UpdateInstanceReply {
+  bool success = 1;
 }

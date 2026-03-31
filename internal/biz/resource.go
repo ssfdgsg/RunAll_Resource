@@ -57,6 +57,18 @@ type InstanceRepo interface {
 type K8sRepo interface {
 	CreateInstance(ctx context.Context, spec InstanceSpec) error
 
+	// DeleteInstance deletes an instance deployment and its associated resources
+	DeleteInstance(ctx context.Context, namespace, instanceID string) error
+
+	// StopInstance scales the deployment replicas to 0
+	StopInstance(ctx context.Context, namespace, instanceID string) error
+
+	// StartInstance scales the deployment replicas to 1
+	StartInstance(ctx context.Context, namespace, instanceID string) error
+
+	// UpdateInstance dynamically updates the instance's resource quotas (CPU/Mem/GPU) and container image
+	UpdateInstance(ctx context.Context, spec InstanceSpec) error
+
 	// CreateServiceForTCPUDP creates a ClusterIP Service for TCP/UDP protocols and patches ingress-nginx ConfigMap
 	// Returns: serviceName, externalPort, error
 	CreateServiceForTCPUDP(ctx context.Context, namespace, instanceID string, port uint32, protocol string) (string, uint32, error)
@@ -431,4 +443,140 @@ func (uc *ResourceUsecase) StreamExec(ctx context.Context, namespace string, ins
 
 	// 调用 data 层执行
 	return uc.ExecRepo.StreamExec(ctx, opts, input, output)
+}
+
+// DeleteInstance deletes an instance deployment and its associated resources
+func (uc *ResourceUsecase) DeleteInstance(ctx context.Context, instanceID int64) error {
+	uc.log.WithContext(ctx).Infof("DeleteInstance: instanceID=%d", instanceID)
+
+	resource, err := uc.InstanceSpec.GetResource(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if resource == nil {
+		return errors.New("instance not found")
+	}
+
+	instanceIDStr := strconv.FormatInt(instanceID, 10)
+	namespace := resource.UserID
+
+	// We can delete network bindings as part of cleanup
+	if err := uc.NetworkRepo.BatchDeleteNetworkBindings(ctx, instanceID); err != nil {
+		uc.log.WithContext(ctx).Warnf("failed to batch delete network bindings, continuing: %v", err)
+	}
+
+	if err := uc.K8sRepo.DeleteInstance(ctx, namespace, instanceIDStr); err != nil {
+		return err
+	}
+
+	// 记录审计日志
+	_ = uc.AuditRepo.CreateAudit(ctx, AuditInformation{
+		InstanceID: instanceID,
+		LogType:    "DELETE",
+		Message:    "Instance deleted",
+		DataJson:   json.RawMessage(`{}`),
+		CreatedAt:  time.Now(),
+	})
+
+	return nil
+}
+
+// StopInstance scales the deployment replicas to 0
+func (uc *ResourceUsecase) StopInstance(ctx context.Context, instanceID int64) error {
+	uc.log.WithContext(ctx).Infof("StopInstance: instanceID=%d", instanceID)
+
+	resource, err := uc.InstanceSpec.GetResource(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if resource == nil {
+		return errors.New("instance not found")
+	}
+
+	instanceIDStr := strconv.FormatInt(instanceID, 10)
+	namespace := resource.UserID
+
+	if err := uc.K8sRepo.StopInstance(ctx, namespace, instanceIDStr); err != nil {
+		return err
+	}
+
+	// 记录审计日志
+	_ = uc.AuditRepo.CreateAudit(ctx, AuditInformation{
+		InstanceID: instanceID,
+		LogType:    "STOP",
+		Message:    "Instance stopped",
+		DataJson:   json.RawMessage(`{}`),
+		CreatedAt:  time.Now(),
+	})
+
+	return nil
+}
+
+// StartInstance scales the deployment replicas to 1
+func (uc *ResourceUsecase) StartInstance(ctx context.Context, instanceID int64) error {
+	uc.log.WithContext(ctx).Infof("StartInstance: instanceID=%d", instanceID)
+
+	resource, err := uc.InstanceSpec.GetResource(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if resource == nil {
+		return errors.New("instance not found")
+	}
+
+	instanceIDStr := strconv.FormatInt(instanceID, 10)
+	namespace := resource.UserID
+
+	if err := uc.K8sRepo.StartInstance(ctx, namespace, instanceIDStr); err != nil {
+		return err
+	}
+
+	// 记录审计日志
+	_ = uc.AuditRepo.CreateAudit(ctx, AuditInformation{
+		InstanceID: instanceID,
+		LogType:    "START",
+		Message:    "Instance started",
+		DataJson:   json.RawMessage(`{}`),
+		CreatedAt:  time.Now(),
+	})
+
+	return nil
+}
+
+// UpdateInstance dynamically updates the instance's resource quotas and container image
+func (uc *ResourceUsecase) UpdateInstance(ctx context.Context, instanceID int64, cpu, memory, gpu uint32, image string) error {
+	uc.log.WithContext(ctx).Infof("UpdateInstance: instanceID=%d cpu=%d mem=%d gpu=%d image=%s", instanceID, cpu, memory, gpu, image)
+
+	r, err := uc.InstanceSpec.GetResource(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if r == nil {
+		return errors.New("instance not found")
+	}
+
+	spec := InstanceSpec{
+		InstanceID: instanceID,
+		UserID:     r.UserID,
+		CPU:        cpu,
+		Memory:     memory,
+		GPU:        gpu,
+		Image:      image,
+	}
+
+	if err := uc.K8sRepo.UpdateInstance(ctx, spec); err != nil {
+		return err
+	}
+
+	// 记录审计日志
+	data := fmt.Sprintf(`{"cpu":%d,"memory":%d,"GPU":%d,"image":"%s"}`, cpu, memory, gpu, image)
+	_ = uc.AuditRepo.CreateAudit(ctx, AuditInformation{
+		InstanceID: instanceID,
+		LogType:    "UPDATE",
+		Message:    "Instance updated",
+		DataJson:   json.RawMessage(data),
+		CreatedAt:  time.Now(),
+	})
+
+	return nil
 }
